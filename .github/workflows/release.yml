@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   release:
-    uses: dylanmtaylor/artcraft-common-actions/.github/workflows/release.yml@main
+    uses: storytold/craft-common-actions/.github/workflows/release.yml@main
     with:
       app-name: photocraft
       app-title: PhotoCraft

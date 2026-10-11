@@ -19,4 +19,4 @@ concurrency:
 
 jobs:
   lint:
-    uses: dylanmtaylor/artcraft-common-actions/.github/workflows/packaging-lint.yml@main
+    uses: storytold/craft-common-actions/.github/workflows/packaging-lint.yml@main
