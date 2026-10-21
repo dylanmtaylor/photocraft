@@ -4642,6 +4642,7 @@ version = "0.11.1"
 dependencies = [
  "arboard",
  "async-io",
+ "chrono",
  "core-graphics2",
  "dispatch2",
  "eframe",
@@ -4809,6 +4810,7 @@ name = "photocraft-engine"
 version = "0.11.1"
 dependencies = [
  "blake3",
+ "chrono",
  "craft-print",
  "exr",
  "flate2",
@@ -8713,6 +8715,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.11.1"
 dependencies = [
+ "chrono",
  "serde",
  "serde_json",
  "toml",

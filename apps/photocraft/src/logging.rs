@@ -92,26 +92,8 @@ fn matches(name: &str, target: &str) -> bool {
 
 /// `2026-10-08T07:59:17.728Z` (UTC, milliseconds). A clock before 1970 reads as the epoch.
 pub fn timestamp(t: SystemTime) -> String {
-    let since = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-    let secs = since.as_secs();
-    let (days, rem) = (secs / 86_400, secs % 86_400);
-    let (y, m, d) = civil_from_days(days);
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z", rem / 3600, rem % 3600 / 60, rem % 60, since.subsec_millis())
-}
-
-/// Days since 1970-01-01 to a proleptic Gregorian (year, month, day) (Howard Hinnant's
-/// `civil_from_days`, unsigned because `timestamp` clamps at the epoch).
-fn civil_from_days(days: u64) -> (u64, u64, u64) {
-    let z = days + 719_468;
-    let era = z / 146_097;
-    let doe = z % 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + u64::from(m <= 2);
-    (y, m, d)
+    let t = t.max(std::time::UNIX_EPOCH);
+    chrono::DateTime::<chrono::Utc>::from(t).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
 fn numbered(dir: &Path, n: usize) -> PathBuf {
