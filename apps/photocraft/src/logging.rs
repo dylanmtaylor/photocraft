@@ -435,7 +435,10 @@ mod tests {
         // Years past 9999 keep the plain zero-padded year (no `+`).
         assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(253_402_300_800)), "10000-01-01T00:00:00.000Z");
         // 10_000_000_000_000 s is far beyond chrono's range; old output is year 318857.
-        assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(10_000_000_000_000)), "318857-05-20T17:46:40.000Z");
+        // Windows' SystemTime holds only up to about year 30828, so this is checked where it fits.
+        if let Some(far) = UNIX_EPOCH.checked_add(Duration::from_secs(10_000_000_000_000)) {
+            assert_eq!(timestamp(far), "318857-05-20T17:46:40.000Z");
+        }
     }
 
     #[test]
