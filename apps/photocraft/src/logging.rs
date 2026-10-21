@@ -403,7 +403,10 @@ mod tests {
         // Before the epoch (a clock set wrong) clamps instead of panicking.
         assert_eq!(timestamp(UNIX_EPOCH - Duration::from_secs(5)), "1970-01-01T00:00:00.000Z");
         // Past chrono's range (a clock set absurdly far ahead) reads as the epoch instead of panicking.
-        assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(u64::MAX / 2)), "1970-01-01T00:00:00.000Z");
+        // Windows' SystemTime can't hold this instant, so it is only checked where it exists.
+        if let Some(far) = UNIX_EPOCH.checked_add(Duration::from_secs(u64::MAX / 2)) {
+            assert_eq!(timestamp(far), "1970-01-01T00:00:00.000Z");
+        }
         // Years past 9999 keep the plain zero-padded year (no `+`).
         assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(253_402_300_800)), "10000-01-01T00:00:00.000Z");
     }
