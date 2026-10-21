@@ -541,12 +541,27 @@ pub fn machine() -> Value {
     json!({"os": os, "os_version": os_version, "arch": arch, "cpu": cpu, "cores": cores, "ram_bytes": ram})
 }
 
-/// `YYYY-MM-DDTHH:MM:SSZ` for a Unix time (proleptic Gregorian, UTC).
+/// `YYYY-MM-DDTHH:MM:SSZ` for a Unix time (proleptic Gregorian, UTC). A time past chrono's year
+/// range still converts (the calendar repeats every 400 years, so the instant is moved into range
+/// by whole cycles and only the year is carried, matching the old hand-rolled `iso_utc`), never a
+/// silent reset to the epoch. Accepts the full `u64` range the old code did.
 pub fn iso_utc(secs: u64) -> String {
     use chrono::Datelike;
-    let t = i64::try_from(secs).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).unwrap_or_default();
-    // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
-    format!("{:04}-{}", t.year(), t.format("%m-%dT%H:%M:%SZ"))
+    // `secs / 86_400` is at most 213_503_982_334_601, so `days` always fits in `i64` (old code too).
+    let (days, sod) = ((secs / 86_400) as i64, (secs % 86_400) as i64);
+    let (cycles, rest) = (days.div_euclid(146_097), days.rem_euclid(146_097));
+    // `rest + 719_163` (1970-01-01 is CE day 719_163) is always a valid CE day, and `sod` < 86_400.
+    let date = i32::try_from(rest + 719_163).ok().and_then(chrono::NaiveDate::from_num_days_from_ce_opt);
+    let time = u32::try_from(sod).ok().and_then(|s| chrono::NaiveTime::from_num_seconds_from_midnight_opt(s, 0));
+    match (date, time) {
+        (Some(d), Some(t)) => {
+            let y = i128::from(d.year()) + i128::from(cycles) * 400;
+            let y = i64::try_from(y).unwrap_or(if y < 0 { i64::MIN } else { i64::MAX });
+            // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
+            format!("{y:04}-{}", d.and_time(t).format("%m-%dT%H:%M:%SZ"))
+        }
+        _ => "1970-01-01T00:00:00Z".to_string(), // unreachable
+    }
 }
 
 fn now_iso() -> String {
@@ -925,8 +940,10 @@ mod tests {
         assert_eq!(iso_utc(1_791_446_357), "2026-10-08T07:59:17Z");
         // Years past 9999 keep the plain zero-padded year (no `+`).
         assert_eq!(iso_utc(253_402_300_800), "10000-01-01T00:00:00Z");
-        // A value past chrono's range reads as the epoch instead of panicking.
-        assert_eq!(iso_utc(u64::MAX), "1970-01-01T00:00:00Z");
+        // A value past chrono's range still converts via the 400-year cycle (the old hand-rolled
+        // `iso_utc` did too): pin that output, never the epoch.
+        assert_eq!(iso_utc(10_000_000_000_000), "318857-05-20T17:46:40Z");
+        assert_eq!(iso_utc(u64::MAX), "584554051223-11-09T07:00:15Z");
     }
 
     const TOML: &str = r#"
