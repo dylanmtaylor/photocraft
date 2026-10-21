@@ -543,8 +543,10 @@ pub fn machine() -> Value {
 
 /// `YYYY-MM-DDTHH:MM:SSZ` for a Unix time (proleptic Gregorian, UTC).
 pub fn iso_utc(secs: u64) -> String {
+    use chrono::Datelike;
     let t = i64::try_from(secs).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).unwrap_or_default();
-    t.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
+    format!("{:04}-{}", t.year(), t.format("%m-%dT%H:%M:%SZ"))
 }
 
 fn now_iso() -> String {
@@ -916,6 +918,16 @@ pub fn render_summary(results: &Value, outcomes: &[Outcome], baseline_note: Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn iso_utc_handles_boundaries() {
+        assert_eq!(iso_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(iso_utc(1_791_446_357), "2026-10-08T07:59:17Z");
+        // Years past 9999 keep the plain zero-padded year (no `+`).
+        assert_eq!(iso_utc(253_402_300_800), "10000-01-01T00:00:00Z");
+        // A value past chrono's range reads as the epoch instead of panicking.
+        assert_eq!(iso_utc(u64::MAX), "1970-01-01T00:00:00Z");
+    }
 
     const TOML: &str = r#"
 [settings]

@@ -90,10 +90,14 @@ fn matches(name: &str, target: &str) -> bool {
     }
 }
 
-/// `2026-10-08T07:59:17.728Z` (UTC, milliseconds). A clock before 1970 reads as the epoch.
+/// `2026-10-08T07:59:17.728Z` (UTC, milliseconds). A clock before 1970, or past the last date
+/// chrono can represent (year 262143), reads as the epoch, so logging never panics.
 pub fn timestamp(t: SystemTime) -> String {
-    let t = t.max(std::time::UNIX_EPOCH);
-    chrono::DateTime::<chrono::Utc>::from(t).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+    use chrono::Datelike;
+    let since = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let t = i64::try_from(since.as_secs()).ok().and_then(|s| chrono::DateTime::from_timestamp(s, since.subsec_nanos())).unwrap_or_default();
+    // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
+    format!("{:04}-{}", t.year(), t.format("%m-%dT%H:%M:%S%.3fZ"))
 }
 
 fn numbered(dir: &Path, n: usize) -> PathBuf {
@@ -398,6 +402,10 @@ mod tests {
         assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(1_709_164_800)), "2024-02-29T00:00:00.000Z");
         // Before the epoch (a clock set wrong) clamps instead of panicking.
         assert_eq!(timestamp(UNIX_EPOCH - Duration::from_secs(5)), "1970-01-01T00:00:00.000Z");
+        // Past chrono's range (a clock set absurdly far ahead) reads as the epoch instead of panicking.
+        assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(u64::MAX / 2)), "1970-01-01T00:00:00.000Z");
+        // Years past 9999 keep the plain zero-padded year (no `+`).
+        assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(253_402_300_800)), "10000-01-01T00:00:00.000Z");
     }
 
     #[test]

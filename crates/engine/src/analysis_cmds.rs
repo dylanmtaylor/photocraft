@@ -230,8 +230,11 @@ pub(crate) fn compound<R>(s: &mut Session, label: &str, f: impl FnOnce(&mut Sess
 pub fn now_iso() -> String {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let now = std::time::SystemTime::now().max(std::time::UNIX_EPOCH);
-        chrono::DateTime::<chrono::Utc>::from(now).format("%Y-%m-%dT%H:%M:%SZ").to_string()
+        use chrono::Datelike;
+        let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+        let now = i64::try_from(since.as_secs()).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).unwrap_or_default();
+        // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
+        format!("{:04}-{}", now.year(), now.format("%m-%dT%H:%M:%SZ"))
     }
     #[cfg(target_arch = "wasm32")]
     {
