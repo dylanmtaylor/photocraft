@@ -579,3 +579,19 @@ fn render_video_rejects_gif_frames_too_large_to_stage() {
     let err = s.execute("file.export.renderVideo", json!({"dir": tmpdir("large-gif"), "format": "gif"})).unwrap_err();
     assert!(err.to_string().contains("too large"), "{err}");
 }
+
+#[test]
+fn fps_from_delays_picks_most_common_and_breaks_ties_by_first_seen() {
+    // Most common delay wins: 100 ms appears twice, 40 ms once -> 10 fps.
+    assert_eq!(fps_from_delays(&[100, 40, 100]), Some(10.0));
+    // Tie between 40 ms (25 fps) and 50 ms (20 fps): the first seen (40) wins.
+    assert_eq!(fps_from_delays(&[40, 50]), Some(25.0));
+    // Delays under 20 ms are treated as 100 ms.
+    assert_eq!(fps_from_delays(&[0, 10, 5]), Some(10.0));
+    assert_eq!(fps_from_delays(&[]), None);
+    // Many distinct delays used to be quadratic; this must stay fast and correct. Delay 20
+    // (the one appearing twice) wins at 50 fps.
+    let mut many: Vec<u32> = (20..5_020).collect();
+    many.push(20);
+    assert_eq!(fps_from_delays(&many), Some(50.0));
+}

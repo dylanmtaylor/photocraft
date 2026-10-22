@@ -227,16 +227,24 @@ struct Footage {
 /// do, since they would otherwise play at an unintended 50-100 fps.
 fn fps_from_delays(delays: &[u32]) -> Option<f32> {
     let clean = |d: u32| if d < 20 { 100 } else { d };
-    let mut counts: Vec<(u32, usize)> = Vec::new();
+    // Count delays with a map keyed on the cleaned delay, recording first-seen order
+    // separately. A linear scan per frame (iter_mut().find) was O(n^2) for a GIF with many
+    // distinct delays. order[] preserves the tie-break: the earliest-seen delay wins.
+    let mut counts: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut order: Vec<u32> = Vec::new();
     for d in delays.iter().copied().map(clean) {
-        match counts.iter_mut().find(|(k, _)| *k == d) {
-            Some((_, n)) => *n += 1,
-            None => counts.push((d, 1)),
-        }
+        let n = counts.entry(d).or_insert_with(|| {
+            order.push(d);
+            0
+        });
+        *n += 1;
     }
-    let best = counts.iter().fold(None::<(u32, usize)>, |best, &(d, n)| match best {
-        Some((_, bn)) if bn >= n => best,
-        _ => Some((d, n)),
+    let best = order.iter().fold(None::<(u32, usize)>, |best, &d| {
+        let n = counts[&d];
+        match best {
+            Some((_, bn)) if bn >= n => best,
+            _ => Some((d, n)),
+        }
     });
     best.map(|(d, _)| 1000.0 / d as f32)
 }
