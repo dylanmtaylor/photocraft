@@ -156,9 +156,13 @@ pub(crate) fn layers(bytes: &[u8], limits: &Limits) -> Result<Vec<CryptomatteLay
         let size = header.layer_size;
         let (w, h) = (u32::try_from(size.0).unwrap_or(u32::MAX), u32::try_from(size.1).unwrap_or(u32::MAX));
         limits.check_bytes(w, h, 8)?;
+        // Cache stream lists by resolved layer name: layer_streams() rescans every channel,
+        // and distinct file-controlled keys can all name the same layer, which would turn
+        // channel discovery into O(keys * channels) work and allocate a fresh list each time.
+        let mut streams_for: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
         for key in cryptomatte_keys(&header.own_attributes.other) {
             let Some(name) = attribute(&header.own_attributes.other, &key, "name") else { continue };
-            let channels = layer_streams(header, name.as_str());
+            let channels = streams_for.entry(name.clone()).or_insert_with(|| layer_streams(header, name.as_str())).clone();
             if channels.is_empty() {
                 continue;
             }
@@ -184,11 +188,15 @@ pub(crate) fn layers(bytes: &[u8], limits: &Limits) -> Result<Vec<CryptomatteLay
 /// Every `cryptomatte/<key>/` key of a header, in file order, without duplicates.
 fn cryptomatte_keys(other: &std::collections::HashMap<exr::meta::attribute::Text, exr::meta::attribute::AttributeValue>) -> Vec<String> {
     let mut keys = Vec::new();
+    // Track seen keys in a set: the attribute names are file-controlled, so membership with
+    // keys.iter().any() is O(n^2) in the number of distinct `cryptomatte/<key>/<field>`
+    // groups. The Vec still records file order; the set only answers "seen before".
+    let mut seen = std::collections::HashSet::new();
     for name in other.keys() {
         let full = name.to_string();
         let Some(rest) = full.strip_prefix("cryptomatte/") else { continue };
         let Some((key, _field)) = rest.split_once('/') else { continue };
-        if !key.is_empty() && !keys.iter().any(|k| k == key) {
+        if !key.is_empty() && seen.insert(key.to_string()) {
             keys.push(key.to_string());
         }
     }
