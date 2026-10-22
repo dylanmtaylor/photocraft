@@ -217,14 +217,18 @@ pub(crate) fn decode(bytes: &[u8], layer_name: &str, limits: &Limits) -> Result<
     let too_large = || CodecError::malformed(F, "the layer is too large");
     let (w32, h32) = (u32::try_from(w).map_err(|_| too_large())?, u32::try_from(h).map_err(|_| too_large())?);
     // Each pixel also gets a pair list, so count its header with the channel samples (four
-    // f32 channels per set: two ranks of ID and coverage).
-    let per_pixel = (layer.channels.len().max(1) as u64).saturating_mul(16).saturating_add(std::mem::size_of::<Vec<(f32, f32)>>() as u64);
+    // f32 channels per set: two ranks of ID and coverage). Include the heap capacity the pair
+    // list can reach: up to one (id, coverage) pair per rank, 8 bytes each. Without this the
+    // returned per-pixel vectors could exceed the caller's max_alloc budget.
+    let ranks = layer.channels.len().saturating_mul(2);
+    let pair_capacity = (ranks as u64).saturating_mul(std::mem::size_of::<(f32, f32)>() as u64);
+    let per_pixel =
+        (layer.channels.len().max(1) as u64).saturating_mul(16).saturating_add(std::mem::size_of::<Vec<(f32, f32)>>() as u64).saturating_add(pair_capacity);
     limits.check_bytes(w32, h32, per_pixel)?;
 
     let ex_layer = super::exr::read_layer(bytes, layer.part)?;
 
     // Two (ID, coverage) ranks per set: rank `slot * 2 + stream.rank`.
-    let ranks = layer.channels.len().saturating_mul(2);
     let mut ids: Vec<Vec<f32>> = vec![Vec::new(); ranks];
     let mut coverages: Vec<Vec<f32>> = vec![Vec::new(); ranks];
     for c in &ex_layer.channel_data.list {
