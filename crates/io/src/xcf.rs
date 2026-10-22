@@ -42,6 +42,10 @@ pub(crate) const MAX_LAYERS: usize = 8192;
 const MAX_CHANNELS: usize = 1024;
 /// Group nesting.
 const MAX_DEPTH: usize = 64;
+/// Total copied layer metadata (names and item paths). A single reused record with a large
+/// name is bounded by MAX_STRING, but repeated layer offsets referencing it must not multiply
+/// into unbounded retained metadata.
+const MAX_METADATA_BYTES: usize = 32 << 20;
 /// A string field (layer names, parasite names).
 const MAX_STRING: usize = 1 << 20;
 /// A property payload or a parasite that is read into memory.
@@ -381,6 +385,10 @@ struct Image<'a> {
     base_type: u32,
     colormap: Vec<[u8; 3]>,
     budget: usize,
+    /// Remaining allowance for copied layer metadata (names, item paths). Repeated layer
+    /// offsets referencing one record with a large name would otherwise allocate an owned
+    /// copy per reference, multiplying a small file into gigabytes of retained metadata.
+    meta_budget: usize,
     warnings: Warnings,
     /// Layers GIMP composites with "Clip to backdrop" (its default for every mode but Normal).
     clipped_to_backdrop: usize,
@@ -685,7 +693,18 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt<'_>) -> Result<Im
         path_count += n;
     }
 
-    let mut image = Image { c: c.at(0), version, precision, compression, base_type, colormap, budget: MAX_PIXEL_BYTES, warnings, clipped_to_backdrop: 0 };
+    let mut image = Image {
+        c: c.at(0),
+        version,
+        precision,
+        compression,
+        base_type,
+        colormap,
+        budget: MAX_PIXEL_BYTES,
+        meta_budget: MAX_METADATA_BYTES,
+        warnings,
+        clipped_to_backdrop: 0,
+    };
     let fmt = PixelFormat::new(mode, depth, true);
     let mask_fmt = PixelFormat::new(ColorMode::Grayscale, depth, false);
     let total = layer_ptrs.len().max(1) as f32;
@@ -842,6 +861,9 @@ impl<'a> Image<'a> {
         let mut c = self.c.at(ptr);
         let (lw, lh, kind) = (c.u32()?, c.u32()?, c.u32()?);
         let name = c.string()?;
+        // Charge the owned name against the document-wide metadata budget: repeated layer
+        // offsets referencing one large name must not retain unbounded copies.
+        self.meta_budget = self.meta_budget.checked_sub(name.len()).ok_or_else(|| invalid("layer metadata exceeds the budget"))?;
         let lprops = props(&mut c)?;
         let hptr = c.ptr()?;
         let mptr = c.ptr()?;
@@ -902,7 +924,11 @@ impl<'a> Image<'a> {
                 26 => text = true,
                 28 => locks.pixels = v != 0,
                 29 => group = true,
-                30 => path = p.data.as_chunks::<4>().0.iter().map(|s| u32::from_be_bytes(*s)).collect(),
+                30 => {
+                    path = p.data.as_chunks::<4>().0.iter().map(|s| u32::from_be_bytes(*s)).collect();
+                    self.meta_budget =
+                        self.meta_budget.checked_sub(path.len().saturating_mul(4)).ok_or_else(|| invalid("layer metadata exceeds the budget"))?;
+                }
                 31 => expanded = v & 1 != 0,
                 32 => locks.position = v != 0,
                 34 => tag = label(v),
