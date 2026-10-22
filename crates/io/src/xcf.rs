@@ -17,6 +17,7 @@
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
 
@@ -290,13 +291,21 @@ fn be_f32(b: &[u8]) -> Option<f32> {
 fn parasites(data: &[u8]) -> Vec<(String, Vec<u8>)> {
     let mut c = Cursor { b: data, pos: 0, wide: false };
     let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+    // Map each name to its output slot so duplicate replacement is O(1). The parasite
+    // records are file-controlled, so scanning `out` with iter_mut().find() per record is
+    // O(n^2) and lets a crafted payload with many distinct names stall import. The map
+    // preserves insertion order and last-value-wins behavior.
+    let mut index: HashMap<String, usize> = HashMap::new();
     while c.pos < data.len() {
         let Ok(name) = c.string() else { break };
         let (Ok(_flags), Ok(len)) = (c.u32(), c.u32()) else { break };
         let Ok(payload) = c.take(len as usize) else { break };
-        match out.iter_mut().find(|(n, _)| *n == name) {
-            Some(slot) => slot.1 = payload.to_vec(),
-            None => out.push((name, payload.to_vec())),
+        match index.get(&name) {
+            Some(&i) => out[i].1 = payload.to_vec(),
+            None => {
+                index.insert(name.clone(), out.len());
+                out.push((name, payload.to_vec()));
+            }
         }
     }
     out
