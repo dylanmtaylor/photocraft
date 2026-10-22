@@ -480,8 +480,19 @@ fn dechunk(mut b: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Where `/path` lands on the server: `/printers/<name>` or `/classes/<name>`.
-fn queue_path(name: &str, is_class: bool) -> String {
-    format!("/{}/{name}", if is_class { "classes" } else { "printers" })
+fn queue_path(name: &str, is_class: bool) -> Result<String> {
+    if name.is_empty() || name.bytes().any(|b| b < 0x20 || b == 0x7f) {
+        return Err(Error::Protocol("printer name contains an invalid control character".into()));
+    }
+    let mut encoded = String::with_capacity(name.len());
+    for &b in name.as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(b));
+        } else {
+            encoded.push_str(&format!("%{b:02X}"));
+        }
+    }
+    Ok(format!("/{}/{encoded}", if is_class { "classes" } else { "printers" }))
 }
 
 /// The printers the server knows (CUPS-Get-Printers), then its classes (CUPS-Get-Classes, which
@@ -568,7 +579,7 @@ pub struct Job<'a> {
 /// Submits `job` (Print-Job) and returns the job id.
 pub fn print_job(endpoint: &Endpoint, job: &Job<'_>) -> Result<u32> {
     let mut r = Request::new(OP_PRINT_JOB, 3);
-    let path = queue_path(job.printer, job.is_class);
+    let path = queue_path(job.printer, job.is_class)?;
     r.attr(TAG_URI, "printer-uri", format!("ipp://{}{path}", endpoint.host()).as_bytes());
     r.attr(TAG_NAME, "requesting-user-name", job.user.as_bytes());
     r.attr(TAG_NAME, "job-name", job.title.as_bytes());
