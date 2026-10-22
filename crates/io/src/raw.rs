@@ -35,8 +35,13 @@ fn limits() -> Limits {
 /// has one; otherwise the raw's IFD0 orientation applies (TIFF-based raws record it there, and
 /// their previews are usually stored as the sensor reads out). Developed raws are oriented by
 /// `photocraft-raw` and their EXIF carries no orientation, so nothing is turned twice.
-fn upright_preview(raw: &[u8], jpeg: &[u8]) -> Result<Image, IoError> {
-    let img = codecs::decode_as_with(Format::Jpeg, jpeg, &codecs::DecodeOptions { keep_orientation: true, ..Default::default() })?;
+fn upright_preview(raw: &[u8], jpeg: &[u8], limits: &photocraft_raw::Limits) -> Result<Image, IoError> {
+    // Decode the embedded preview under the caller's limits, not the codec defaults: an
+    // embedded JPEG can declare far more decoded pixels than the raw development the caller
+    // authorized, so the preview fallback must honor the same policy.
+    let codec_limits =
+        codecs::Limits { max_width: limits.max_width, max_height: limits.max_height, max_pixels: limits.max_pixels, max_alloc: limits.max_alloc };
+    let img = codecs::decode_as_with(Format::Jpeg, jpeg, &codecs::DecodeOptions { keep_orientation: true, limits: codec_limits })?;
     let own = img.meta.exif.as_deref().map_or(1, codecs::exif_orientation);
     let o = if own != 1 { own } else { photocraft_raw::orientation(raw).unwrap_or_else(|| codecs::exif_orientation(raw)) };
     Ok(img.oriented(o)?)
@@ -216,7 +221,7 @@ pub fn fit_preview_look(raw: &[u8], sensor: &Sensor, opts: &DevelopOptions) -> R
         .min_by_key(|p| long(p))
         .or_else(|| previews.iter().max_by_key(|p| long(p)))
         .ok_or("no embedded JPEG preview")?;
-    let img = upright_preview(raw, pick.jpeg).map_err(|e| format!("the embedded preview does not decode: {e}"))?;
+    let img = upright_preview(raw, pick.jpeg, &opts.limits).map_err(|e| format!("the embedded preview does not decode: {e}"))?;
     if img.layout() != ChannelLayout::Rgb || img.sample_type() != SampleType::U8 {
         return Err("the embedded preview is not 8-bit RGB".into());
     }
@@ -260,7 +265,7 @@ pub fn import_raw_with(name: &str, bytes: &[u8], opts: &DevelopOptions) -> Resul
         }
         Err(RawError::Unsupported(reason)) => match photocraft_raw::embedded_preview(bytes) {
             Some(p) => {
-                let img = upright_preview(bytes, p.jpeg)?;
+                let img = upright_preview(bytes, p.jpeg, &opts.limits)?;
                 let mut r = image_to_document(name, &img)?;
                 r.warnings.insert(
                     0,
