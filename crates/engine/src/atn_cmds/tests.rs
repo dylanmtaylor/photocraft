@@ -164,6 +164,18 @@ fn load_renames_each_play_target_once() {
 }
 
 #[test]
+fn load_many_duplicate_names_get_sequential_suffixes() {
+    // Several actions share one base name. Deduplication must stay O(n) overall and produce
+    // the sequence A, A 2, A 3, A 4 (the next-suffix cache cannot skip or repeat a number).
+    let mut s = Session::new();
+    let dupes: Vec<Action> = (0..4).map(|_| Action::new("A", vec![])).collect();
+    let refs: Vec<&Action> = dupes.iter().collect();
+    let (bytes, _) = export("File", &refs, &[], false).unwrap();
+    let r = s.execute("actions.load", json!({"data": b64(&bytes)})).unwrap();
+    assert_eq!(r["actions"], json!(["A", "A 2", "A 3", "A 4"]));
+}
+
+#[test]
 fn save_round_trips_through_photoshop_events() {
     let mut s = Session::new();
     let bytes = atn::write(&sample()).unwrap();

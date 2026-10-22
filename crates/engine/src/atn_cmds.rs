@@ -3631,12 +3631,34 @@ pub fn export(
 
 // ------------------------------------------------------------------ commands
 
-/// A name not used by any action in `taken`: `name`, `name 2`, `name 3`…
-fn unique(name: &str, taken: &[String]) -> String {
-    if !taken.iter().any(|t| t == name) {
-        return name.to_string();
+/// Assigns names not already used, as `name`, `name 2`, `name 3`… A plain linear scan of the
+/// taken list per candidate is cubic when an action file repeats one base name many times, so
+/// membership uses a set and the next suffix to try is cached per base name.
+struct UniqueNames {
+    taken: std::collections::HashSet<String>,
+    next_suffix: std::collections::HashMap<String, u32>,
+}
+
+impl UniqueNames {
+    fn new<I: IntoIterator<Item = String>>(existing: I) -> Self {
+        UniqueNames { taken: existing.into_iter().collect(), next_suffix: std::collections::HashMap::new() }
     }
-    (2..).map(|i| format!("{name} {i}")).find(|n| !taken.contains(n)).unwrap_or_else(|| name.to_string())
+
+    /// Reserves and returns a unique name derived from `name`, recording it as taken.
+    fn claim(&mut self, name: &str) -> String {
+        if self.taken.insert(name.to_string()) {
+            return name.to_string();
+        }
+        let mut i = self.next_suffix.get(name).copied().unwrap_or(2);
+        loop {
+            let candidate = format!("{name} {i}");
+            i += 1;
+            if self.taken.insert(candidate.clone()) {
+                self.next_suffix.insert(name.to_string(), i);
+                return candidate;
+            }
+        }
+    }
 }
 
 fn load(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3664,19 +3686,18 @@ fn load(s: &mut Session, p: &Value) -> Result<Value> {
     if replace {
         s.actions.list.retain(|a| a.set.as_deref() != Some(imp.set.as_str()));
     }
-    let mut taken: Vec<String> = s.actions.list.iter().map(|a| a.name.clone()).collect();
+    let mut taken = UniqueNames::new(s.actions.list.iter().map(|a| a.name.clone()));
     let mut names = Vec::with_capacity(imp.actions.len());
     // The file's name of each action that had to be renamed, and its new name.
     let mut renamed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut steps = 0usize;
     let mut added = Vec::with_capacity(imp.actions.len());
     for mut a in imp.actions {
-        let name = unique(&a.name, &taken);
+        let name = taken.claim(&a.name);
         if name != a.name {
             renamed.entry(a.name.clone()).or_insert_with(|| name.clone());
         }
         a.name = name.clone();
-        taken.push(name.clone());
         steps = steps.saturating_add(a.steps.len());
         names.push(name);
         added.push(a);
