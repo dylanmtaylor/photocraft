@@ -74,12 +74,13 @@ pub fn embedded_previews(bytes: &[u8]) -> Vec<Preview<'_>> {
             if let (Some(off), Some(len)) = (t.tag_uint(&ifd, tag::JPEG_INTERCHANGE_FORMAT), t.tag_uint(&ifd, tag::JPEG_INTERCHANGE_FORMAT_LENGTH)) {
                 found.extend(candidate(bytes, off as usize, len as usize));
             }
-            if matches!(t.tag_uint(&ifd, tag::COMPRESSION), Some(6 | 7)) {
-                let offs = t.tag_uints(&ifd, tag::STRIP_OFFSETS);
-                let lens = t.tag_uints(&ifd, tag::STRIP_BYTE_COUNTS);
-                if let ([off], [len]) = (offs.as_slice(), lens.as_slice()) {
-                    found.extend(candidate(bytes, *off as usize, *len as usize));
-                }
+            if matches!(t.tag_uint(&ifd, tag::COMPRESSION), Some(6 | 7))
+                && let (Some(offsets), Some(lengths)) = (ifd.get(tag::STRIP_OFFSETS), ifd.get(tag::STRIP_BYTE_COUNTS))
+                && offsets.count == 1
+                && lengths.count == 1
+                && let (Some(off), Some(len)) = (t.uint(offsets, 0), t.uint(lengths, 0))
+            {
+                found.extend(candidate(bytes, off as usize, len as usize));
             }
             // Panasonic RW2 JpgFromRaw (0x002E) holds a complete JPEG.
             if let Some(e) = ifd.get(0x002E).filter(|e| e.typ == 7)

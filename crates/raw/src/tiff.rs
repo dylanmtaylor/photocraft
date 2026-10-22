@@ -213,9 +213,11 @@ impl<'a> Tiff<'a> {
             }
             for t in [tag::SUB_IFDS, tag::EXIF_IFD] {
                 if let Some(e) = ifd.get(t) {
-                    // Reverse so the first SubIFD is visited first.
-                    let mut v = self.uints(e);
-                    v.truncate(16);
+                    // Linked-directory traversal only needs the first sixteen offsets. Read
+                    // those values directly instead of expanding the complete file-controlled
+                    // array and truncating it afterward.
+                    let n = (e.count as usize).min(16);
+                    let v = (0..n).map(|i| self.uint(e, i)).collect::<Option<Vec<_>>>().unwrap_or_default();
                     stack.extend(v.into_iter().rev().map(|o| o as usize));
                 }
             }
@@ -401,4 +403,21 @@ mod tests {
         let ifd = t.ifd_at(8, 0).unwrap();
         assert_eq!(t.float(ifd.get(50730).unwrap(), 0), None);
     }
+}
+
+#[test]
+fn linked_directory_values_are_read_only_as_needed() {
+    // The traversal limit is independent of the TIFF entry count: callers should
+    // never need a complete attacker-controlled offset array to visit SubIFDs.
+    let mut b = b"II*\0\x08\0\0\0".to_vec();
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&330u16.to_le_bytes());
+    b.extend_from_slice(&4u16.to_le_bytes());
+    b.extend_from_slice(&(1_000_000u32).to_le_bytes());
+    b.extend_from_slice(&26u32.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.resize(26 + 16 * 4, 0);
+    let t = Tiff::new(&b).unwrap();
+    assert!(t.all_ifds().len() <= 17);
 }
