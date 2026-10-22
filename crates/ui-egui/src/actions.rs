@@ -101,6 +101,10 @@ pub(crate) fn play(app: &mut PhotocraftApp, params: &Value) -> Result<Value, Str
     let mut failed = None;
     let mut paused = None;
     for (i, (id, p)) in action.enabled_steps().skip_while(|(i, _)| *i < from) {
+        if !actions_cmds::consume_playback_step(&mut app.session) {
+            failed = Some(json!({"step": i, "id": id, "error": format!("action playback exceeded the {}-step limit", actions_cmds::MAX_PLAYBACK_STEPS)}));
+            break;
+        }
         // The dialog toggle: show the step's dialog with its recorded values and continue
         // from the next step when it is confirmed (`resume`). Agents play headlessly.
         if action.dialogs.contains(&i) && !app.automation_input && (crate::filter_dialog::has_dialog(id) || crate::adjust_dialog::has_dialog(id)) {

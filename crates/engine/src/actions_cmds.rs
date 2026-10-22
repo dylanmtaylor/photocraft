@@ -81,6 +81,8 @@ pub struct ActionsFile {
     pub actions: Vec<Action>,
 }
 
+pub const MAX_PLAYBACK_STEPS: u64 = 100_000;
+
 /// Actions list and the recording / playback flags. Only `list` is persisted.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -95,6 +97,9 @@ pub struct ActionState {
     /// Active action names, for cycle detection in engine and desktop playback.
     #[serde(skip)]
     pub playback_stack: Vec<String>,
+    /// Number of steps executed by the current top-level playback tree.
+    #[serde(skip)]
+    pub playback_steps: u64,
     /// Bumped whenever `list` changes, so the preset store can skip unchanged writes.
     #[serde(skip)]
     pub rev: u64,
@@ -143,6 +148,15 @@ pub fn save_target_closed(s: &Session, id: &str, target: Option<photocraft_doc::
     })
 }
 
+/// Charge one step against the complete nested playback tree.
+pub fn consume_playback_step(s: &mut Session) -> bool {
+    if s.actions.playback_steps >= MAX_PLAYBACK_STEPS {
+        false
+    } else {
+        s.actions.playback_steps += 1;
+        true
+    }
+}
 /// View-only menu commands recorded by the desktop shell. Headless playback reports
 /// them as unsupported instead of silently dropping them; Batch and droplets skip them.
 pub fn shell_view_command(id: &str) -> bool {
@@ -348,6 +362,10 @@ fn run_recorded(s: &mut Session, action: &Action, from: usize) -> (u64, Option<V
     let mut ran = 0u64;
     let mut failed = None;
     for (i, (id, params)) in action.enabled_steps().skip_while(|(i, _)| *i < from) {
+        if !consume_playback_step(s) {
+            failed = Some(json!({"step": i, "id": id, "error": format!("action playback exceeded the {}-step limit", MAX_PLAYBACK_STEPS)}));
+            break;
+        }
         if let Some(auth) = s.authorize
             && let Err(e) = auth(id, params)
         {
@@ -379,6 +397,9 @@ fn run_recorded(s: &mut Session, action: &Action, from: usize) -> (u64, Option<V
 /// for diagnostics, but record just the named call in the parent action.
 pub fn begin_playback(s: &mut Session, action: &Action) -> Result<Option<(usize, usize)>> {
     flush_recording(s)?;
+    if s.actions.playing == 0 {
+        s.actions.playback_steps = 0;
+    }
     let recording = s.actions.recording.take();
     s.actions.playing = s.actions.playing.saturating_add(1);
     s.actions.playback_stack.push(action.name.clone());
@@ -1581,5 +1602,18 @@ mod tests {
             assert!(s.execute("actions.setColor", bad).is_err());
         }
         assert!(s.actions.list[0].color.is_empty(), "rejected colours change nothing");
+    }
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    #[test]
+    fn playback_budget_is_shared_by_nested_calls() {
+        let mut session = Session::new();
+        session.actions.playback_steps = MAX_PLAYBACK_STEPS - 1;
+        assert!(consume_playback_step(&mut session));
+        assert!(!consume_playback_step(&mut session));
     }
 }

@@ -1259,7 +1259,9 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
     let actions = crate::actions_cmds::ActionState { list, playing: s.actions.playing, playback_stack: s.actions.playback_stack.clone(), ..Default::default() };
     let names = batch_naming::plan(&inputs, &output, &format, p)?;
     let save = SaveOpts::from_params(s, p, cmd)?;
-    let run = |scratch: &mut Session| {
+    let authorize = s.authorize;
+    let run = move |scratch: &mut Session| {
+        scratch.authorize = authorize;
         scratch.actions = actions.clone();
         for (id, params) in &steps {
             let r = scratch.execute(id, params.clone())?;
