@@ -328,13 +328,32 @@ pub(crate) fn orientation(v: Option<u32>) -> u16 {
 /// A human-readable listing of every IFD and entry (debugging aid).
 pub(crate) fn dump(data: &[u8]) -> String {
     use std::fmt::Write;
+    // Caps so a crafted TIFF (many entries aliasing one large ASCII value) cannot expand a
+    // small diagnostic input into a multi-gigabyte String.
+    const MAX_ASCII_PREVIEW: usize = 256;
+    const MAX_OUTPUT: usize = 1 << 20;
     let Some(t) = Tiff::new(data) else { return "not a TIFF-structured file".into() };
     let mut s = String::new();
-    for ifd in t.all_ifds() {
+    'ifds: for ifd in t.all_ifds() {
         let _ = writeln!(s, "IFD @{}", ifd.offset);
         for e in &ifd.entries {
+            if s.len() >= MAX_OUTPUT {
+                s.push_str("… (output truncated)\n");
+                break 'ifds;
+            }
             let preview: String = if e.typ == 2 {
-                t.ascii(e).unwrap_or_default()
+                let mut a = t.ascii(e).unwrap_or_default();
+                if a.len() > MAX_ASCII_PREVIEW {
+                    // Truncate at a char boundary at or below the cap (lossy UTF-8 can hold
+                    // multi-byte replacement chars).
+                    let mut cut = MAX_ASCII_PREVIEW;
+                    while cut > 0 && !a.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    a.truncate(cut);
+                    a.push('…');
+                }
+                a
             } else {
                 let n = (e.count as usize).min(12);
                 let v: Vec<String> = (0..n).map(|i| t.float(e, i).map(|f| format!("{f}")).unwrap_or_else(|| "?".into())).collect();
@@ -400,5 +419,34 @@ mod tests {
         let t = Tiff::new(&b).unwrap();
         let ifd = t.ifd_at(8, 0).unwrap();
         assert_eq!(t.float(ifd.get(50730).unwrap(), 0), None);
+    }
+
+    #[test]
+    fn dump_output_is_bounded_for_aliased_ascii() {
+        // Many ASCII entries all pointing at one large value must not expand the diagnostic
+        // dump without bound. Build an IFD whose entries alias a big ASCII blob.
+        const ENTRIES: usize = 4000;
+        const BLOB: usize = 100_000;
+        let header = 8u32;
+        let ifd_at = header;
+        let entry_count_bytes = 2;
+        let entries_bytes = ENTRIES * 12;
+        let next_ptr_bytes = 4;
+        let blob_at = ifd_at as usize + entry_count_bytes + entries_bytes + next_ptr_bytes;
+        let mut b = b"II*\0".to_vec();
+        b.extend_from_slice(&ifd_at.to_le_bytes());
+        b.extend_from_slice(&(ENTRIES as u16).to_le_bytes());
+        for i in 0..ENTRIES {
+            b.extend_from_slice(&(1000 + i as u16).to_le_bytes()); // tag
+            b.extend_from_slice(&2u16.to_le_bytes()); // type ASCII
+            b.extend_from_slice(&(BLOB as u32).to_le_bytes()); // count
+            b.extend_from_slice(&(blob_at as u32).to_le_bytes()); // value offset (aliased)
+        }
+        b.extend_from_slice(&0u32.to_le_bytes()); // next IFD = none
+        b.resize(blob_at + BLOB, b'A');
+        let out = dump(&b);
+        // Comfortably below entries * blob (~400 MB); the caps keep it near 1 MiB.
+        assert!(out.len() < 2 << 20, "dump output was {} bytes", out.len());
+        assert!(out.contains("output truncated") || out.len() < 1 << 20);
     }
 }
