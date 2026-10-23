@@ -316,8 +316,10 @@ fn triangles(src: &Surface, src_rect: Rect, verts: &[([f64; 2], [f64; 2])], tris
         }
         let foot = Rect::new(fx0.floor() as i32 - 3, fy0.floor() as i32 - 3, fx1.ceil() as i32 + 3, fy1.ceil() as i32 + 3).intersect(&src_rect);
         // Sparse components far apart in the source can land in one tile: the dense window
-        // between them is not read (the tile stays empty).
-        if foot.is_empty() || !src.has_tiles_in(foot) || foot.size().area() > MAX_FOOTPRINT_PIXELS {
+        // between them is not read (the tile stays empty). The pixel-area cap is checked first:
+        // `has_tiles_in` walks the source tile grid, so an oversized footprint must return
+        // without paying for that scan.
+        if foot.is_empty() || foot.size().area() > MAX_FOOTPRINT_PIXELS || !src.has_tiles_in(foot) {
             return None;
         }
         let mut px = src.read_region(foot);

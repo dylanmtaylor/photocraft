@@ -999,10 +999,18 @@ pub fn apply_in_with(
 }
 
 /// Results do not depend on the tiling, so wide-halo filters use bigger tiles to keep the
-/// re-read margin (and its cost) below ~2× the tile area.
+/// re-read margin (and its cost) below ~2× the tile area. The radius is input-derived, so the
+/// halo arithmetic is done in `i64` and the result capped: an `i32::MAX` radius must not
+/// overflow in debug builds, and must not produce a tile bigger than the hard cap.
 fn auto_tile(params: &FilterParams, bounds: Rect) -> i32 {
     match params.halo_for(bounds) {
-        Halo::Radius(r) => TILE.max((2 * r + 63) / 64 * 64).min(2048),
+        // The radius is input-derived: widen to i64 before the arithmetic and cap the
+        // conversion, so an i32::MAX radius cannot overflow (debug panic) and cannot make a
+        // tile bigger than the hard cap below (131_072 = 2048 * 64, one tile row).
+        Halo::Radius(r) => {
+            let halo = ((2 * i64::from(r) + 63) / 64 * 64).min(131_072);
+            TILE.max(halo as i32).min(2048)
+        }
         Halo::Bounds => TILE,
     }
 }
