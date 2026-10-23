@@ -469,7 +469,7 @@ fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, p: &Value) 
             let sel = doc.selection.clone();
             let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
             let mask = l.mask.as_mut().ok_or_else(|| EngineError::Other("layer has no mask".into()))?;
-            pixels::adjust_mask(&mut mask.surface, &adj, sel.as_ref());
+            pixels::adjust_mask(&mut mask.surface, &adj, sel.as_ref()).map_err(EngineError::Other)?;
             Ok(Value::Null)
         });
     }
@@ -479,7 +479,7 @@ fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, p: &Value) 
         return s.edit(label, |doc, _| {
             let sel = doc.selection.clone();
             if let Some(surf) = crate::channel_cmds::channel_surface_for_filter(doc, None, p)? {
-                pixels::adjust_mask(surf, &adj, sel.as_ref());
+                pixels::adjust_mask(surf, &adj, sel.as_ref()).map_err(EngineError::Other)?;
             }
             Ok(Value::Null)
         });
@@ -489,7 +489,7 @@ fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, p: &Value) 
         let sel = doc.selection.clone();
         let mode = doc.mode;
         let surf = paint_surface(doc, id, &Value::Null)?;
-        pixels::adjust_surface(surf, &adj, sel.as_ref(), mode);
+        pixels::adjust_surface(surf, &adj, sel.as_ref(), mode).map_err(EngineError::Other)?;
         Ok(())
     })?;
     Ok(Value::Null)

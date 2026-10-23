@@ -293,6 +293,10 @@ fn load_frames(path: &str, fmt: photocraft_color::PixelFormat) -> Result<Footage
     // Each frame stores whole tiles however little it draws, so count the tiles kept so far.
     let mut kept_bytes = 0u64;
     let mut keep = |frames: &mut Vec<Surface>, surface: Surface| -> std::result::Result<(), String> {
+        // A frame of fully transparent pixels stores no tiles, so the count needs its own limit.
+        if frames.len() >= crate::timeline_cmds::MAX_DURATION {
+            return Err(format!("the footage has more than {} frames", crate::timeline_cmds::MAX_DURATION));
+        }
         let tile = u64::from(photocraft_geom::TILE_SIZE.unsigned_abs()).pow(2) * surface.format().bytes_per_pixel() as u64;
         kept_bytes = kept_bytes.saturating_add(tile.saturating_mul(surface.tile_count() as u64));
         if kept_bytes > MAX_FOOTAGE_BYTES {

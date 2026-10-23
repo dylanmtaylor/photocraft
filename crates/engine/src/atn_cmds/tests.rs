@@ -315,6 +315,25 @@ fn load_renames_each_play_target_once() {
     assert_eq!(s.actions.list[1].steps[0].1, json!({"action": "A"}), "B still plays the A it had");
 }
 
+/// A name over the 1,024-character limit is clipped for the action and for the steps that call it,
+/// so a rename still finds its Play target.
+#[test]
+fn load_renames_play_targets_longer_than_the_name_limit() {
+    let mut s = Session::new();
+    let long = "x".repeat(2000);
+    let clipped = "x".repeat(1024);
+    let mut mine = Action::new(clipped.clone(), vec![]);
+    mine.set = Some("Mine".into());
+    s.actions.list.push(mine);
+    let a = Action::new(long.clone(), vec![]);
+    let caller = Action::new("Caller", vec![("actions.play".into(), json!({"action": long}))]);
+    let (bytes, _) = export("File", &[&a, &caller], &[], false).unwrap();
+    s.execute("actions.load", json!({"data": b64(&bytes)})).unwrap();
+    let renamed = format!("{clipped} 2");
+    let caller = s.actions.list.iter().find(|a| a.name == "Caller").unwrap();
+    assert_eq!(caller.steps[0].1["action"], renamed.as_str());
+}
+
 #[test]
 fn load_many_duplicate_names_get_sequential_suffixes() {
     // Several actions share one base name. Deduplication must stay O(n) overall and produce

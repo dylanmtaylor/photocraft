@@ -122,7 +122,7 @@ fn check_known(steps: &[(String, Value)], cmd: &str) -> Result<()> {
 /// Scripts nested in scripts, and steps one top-level script (with everything it calls) may run:
 /// a script can name others, so a graph that calls each of the previous ones twice is exponential.
 const MAX_SCRIPT_DEPTH: u8 = 16;
-const MAX_SCRIPT_STEPS: u64 = crate::actions_cmds::MAX_PLAYBACK_STEPS;
+pub(crate) const MAX_SCRIPT_STEPS: u64 = crate::actions_cmds::MAX_PLAYBACK_STEPS;
 
 /// A script run from a script reports its own failure inside an `Ok`; it stops the caller too.
 fn nested_script_failure(id: &str, r: &Value) -> Option<String> {

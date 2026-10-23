@@ -1466,12 +1466,13 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
             list
         }
     };
-    // A batch inside a played action charges its inputs × steps to the playback tree it is in and
+    // A batch inside a played action charges its inputs × steps (at least one each: an input is read,
+    // decoded and saved even with no steps) to the playback tree it is in and
     // hands the count on, so a batch of batches can't multiply past the limit. A top-level batch
     // is not limited by it.
     let mut playback_steps = 0;
     if s.actions.playing > 0 {
-        playback_steps = s.actions.playback_steps.saturating_add((steps.len() as u64).saturating_mul(inputs.len() as u64));
+        playback_steps = s.actions.playback_steps.saturating_add((steps.len().max(1) as u64).saturating_mul(inputs.len() as u64));
         if playback_steps > crate::actions_cmds::MAX_PLAYBACK_STEPS {
             return Err(EngineError::BadParams { cmd: cmd.into(), msg: "this batch would exceed the playback step limit of the action that runs it".into() });
         }
@@ -1487,38 +1488,50 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
     let names = batch_naming::plan(&inputs, &output, &format, p)?;
     let save = SaveOpts::from_params(s, p, cmd)?;
     let authorize = s.authorize;
+    // Each input runs in its own scratch session, so what the played steps spend is carried from
+    // one input to the next (failed or not) and back to this session, not restarted per input.
+    let carried = std::cell::Cell::new(playback_steps);
+    let carried = &carried;
     let run = move |scratch: &mut Session, out: &str| {
         scratch.authorize = authorize;
         scratch.actions = actions.clone();
-        // The document as the last recorded save found it, written once the action has run so a
-        // failing step still writes nothing.
-        let mut saved: Option<Arc<Document>> = None;
-        for (id, params) in &steps {
-            if batch_save_point(id) {
-                saved = Some(scratch.active().ok_or(EngineError::NoDocument)?.doc.clone());
-                continue;
+        scratch.actions.playback_steps = carried.get();
+        let result = (|| {
+            // The document as the last recorded save found it, written once the action has run so a
+            // failing step still writes nothing.
+            let mut saved: Option<Arc<Document>> = None;
+            for (id, params) in &steps {
+                if batch_save_point(id) {
+                    saved = Some(scratch.active().ok_or(EngineError::NoDocument)?.doc.clone());
+                    continue;
+                }
+                let r = scratch.execute(id, params.clone())?;
+                // A failed step inside a called action makes this file an error, not a saved result.
+                if let Some(error) = crate::actions_cmds::nested_failure(id, &r) {
+                    return Err(EngineError::Other(error));
+                }
             }
-            let r = scratch.execute(id, params.clone())?;
-            // A failed step inside a called action makes this file an error, not a saved result.
-            if let Some(error) = crate::actions_cmds::nested_failure(id, &r) {
-                return Err(EngineError::Other(error));
+            // While the saved document is still open the steps after the save reach the result too
+            // (#3058), so it is saved after the action as usual. Closed after its save, or with another
+            // document left active, it is written as the save found it.
+            match saved {
+                Some(doc) if scratch.active().is_none_or(|d| d.doc.id != doc.id) => {
+                    save_doc(&doc, out, save)?;
+                    Ok(true)
+                }
+                _ => Ok(false),
             }
-        }
-        // While the saved document is still open the steps after the save reach the result too
-        // (#3058), so it is saved after the action as usual. Closed after its save, or with another
-        // document left active, it is written as the save found it.
-        match saved {
-            Some(doc) if scratch.active().is_none_or(|d| d.doc.id != doc.id) => {
-                save_doc(&doc, out, save)?;
-                Ok(true)
-            }
-            _ => Ok(false),
-        }
+        })();
+        carried.set(scratch.actions.playback_steps);
+        result
     };
     let r = match names {
         Some(names) => process_outputs(s, inputs.iter().map(|i| i.path.as_str()).zip(names), save, &run),
         None => process_tree(s, &inputs, &output, &format, save, "", &run),
     };
+    if s.actions.playing > 0 {
+        s.actions.playback_steps = carried.get();
+    }
     Ok(r)
 }
 

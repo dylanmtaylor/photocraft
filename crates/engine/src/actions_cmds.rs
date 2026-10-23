@@ -156,6 +156,14 @@ pub fn save_target_closed(s: &Session, id: &str, target: Option<photocraft_doc::
 
 /// Charge one step against the complete nested playback tree.
 pub fn consume_playback_step(s: &mut Session) -> bool {
+    // Inside a script the step also counts against the script's total: each top-level playback
+    // resets its own counter, so a script playing actions in a row would never reach the limit.
+    if s.actions.script_depth > 0 {
+        if s.actions.script_steps >= crate::automate_cmds::MAX_SCRIPT_STEPS {
+            return false;
+        }
+        s.actions.script_steps += 1;
+    }
     if s.actions.playback_steps >= MAX_PLAYBACK_STEPS {
         false
     } else {

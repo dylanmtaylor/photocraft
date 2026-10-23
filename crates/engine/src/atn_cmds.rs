@@ -1949,7 +1949,8 @@ fn conditional_from(d: &Descriptor) -> Mapped {
         return Mapped::Unsupported { harmless: false };
     }
     let branch = |key: &str| match get_ref(d, key).map(target) {
-        Some(Target::Name(n)) => Some(n),
+        // Clipped like the stored action names, so the load-time rename map finds it.
+        Some(Target::Name(n)) => Some(clip_name(&n)),
         _ => None,
     };
     step("actions.conditional", json!({"if": condition, "then": branch("then"), "else": branch("else")}))
@@ -2468,7 +2469,7 @@ fn apply_comp_to(_: &str, p: &Value) -> Option<Descriptor> {
 
 fn play_from(d: &Descriptor) -> Mapped {
     match get_ref(d, "null").map(target) {
-        Some(Target::Name(n)) => step("actions.play", json!({"action": n})),
+        Some(Target::Name(n)) => step("actions.play", json!({"action": clip_name(&n)})),
         _ => Mapped::Unsupported { harmless: false },
     }
 }
