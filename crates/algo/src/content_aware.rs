@@ -297,11 +297,8 @@ fn fill_cow(
         }
     };
     // Mosaic: identity at the left, variants in a column to its right, gaps that are no image.
-    // Without variants it is the image itself; so it is when the variants would not fit.
-    let size = if extra.is_empty() { None } else { mosaic_size(w, h, gap, &extra) };
-    if size.is_none() {
-        extra.clear();
-    }
+    // Without variants it is the image itself; so it is when the variants would not fit
+    // (`size` above is then None and `extra` is empty).
     let (mw, mh, mosaic, roles): (usize, usize, Option<Vec<f32>>, Vec<Px>) = if let Some((mw, mh)) = size {
         let mut mimg = vec![0.0f32; mw * mh * ch];
         let mut roles = vec![Px::Void; mw * mh];
