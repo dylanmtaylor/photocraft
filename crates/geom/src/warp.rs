@@ -541,7 +541,7 @@ impl BezierMesh {
     /// is unchanged. Returns false when `s` is on or too close to an existing boundary.
     pub fn split_u(&mut self, s: f64) -> bool {
         let (pi, a) = Self::locate(&self.us, s);
-        if self.us.len() >= 65 || !(0.01..=0.99).contains(&a) {
+        if !(0.01..=0.99).contains(&a) {
             return false;
         }
         let (nx, ny) = (self.nx(), self.ny());
