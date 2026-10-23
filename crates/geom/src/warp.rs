@@ -978,7 +978,7 @@ impl Warp {
                                     let expected = self.box_point(u, v);
                                     let actual = m.points[(3 * pj + j) * nx + 3 * pi + i];
                                     // Relative to the magnitude so the fit's rounding at large origins isn't rejected.
-                                    let tol = |e: f64| 1e-9 * e.abs().max(1.0);
+                                    let tol = |e: f64| (1e-9 * e.abs().max(1.0)).min(1e-6);
                                     if (actual[0] - expected[0]).abs() >= tol(expected[0]) || (actual[1] - expected[1]).abs() >= tol(expected[1]) {
                                         return false;
                                     }
