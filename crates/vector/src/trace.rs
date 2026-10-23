@@ -680,7 +680,11 @@ mod tests {
             }
         }
         v[2 * w + 2] = f32::NAN;
+        v[w + 1] = 1.0;
+        v[w + 2] = 1.0;
+        v[2 * w + 1] = 1.0;
         let path = trace_mask(&v, Rect::new(0, 0, w as i32, h as i32), f32::NAN, 1.0);
+        assert!(path.subpaths.iter().any(|sp| !sp.knots.is_empty()));
         for sp in &path.subpaths {
             for k in &sp.knots {
                 assert!(k.anchor.x.is_finite() && k.anchor.y.is_finite());

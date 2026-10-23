@@ -541,7 +541,7 @@ impl BezierMesh {
     /// is unchanged. Returns false when `s` is on or too close to an existing boundary.
     pub fn split_u(&mut self, s: f64) -> bool {
         let (pi, a) = Self::locate(&self.us, s);
-        if !(0.01..=0.99).contains(&a) {
+        if self.us.len() >= 65 || !(0.01..=0.99).contains(&a) {
             return false;
         }
         let (nx, ny) = (self.nx(), self.ny());
@@ -977,7 +977,9 @@ impl Warp {
                                     let u = m.us[pi] + (m.us[pi + 1] - m.us[pi]) * i as f64 / 3.0;
                                     let expected = self.box_point(u, v);
                                     let actual = m.points[(3 * pj + j) * nx + 3 * pi + i];
-                                    if (actual[0] - expected[0]).abs() >= 1e-9 || (actual[1] - expected[1]).abs() >= 1e-9 {
+                                    // Relative to the magnitude so the fit's rounding at large origins isn't rejected.
+                                    let tol = |e: f64| 1e-9 * e.abs().max(1.0);
+                                    if (actual[0] - expected[0]).abs() >= tol(expected[0]) || (actual[1] - expected[1]).abs() >= tol(expected[1]) {
                                         return false;
                                     }
                                 }
