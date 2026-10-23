@@ -156,11 +156,14 @@ fn tile_bands(r: Rect) -> Vec<Rect> {
     if r.is_empty() {
         return out;
     }
-    let mut y = r.y0.div_euclid(TILE_SIZE) * TILE_SIZE;
-    while y < r.y1 {
-        let band = Rect::new(r.x0, y.max(r.y0), r.x1, (y + TILE_SIZE).min(r.y1));
+    let step = i64::from(TILE_SIZE);
+    let (y0, y1) = (i64::from(r.y0), i64::from(r.y1));
+    let mut y = y0.div_euclid(step) * step;
+    while y < y1 {
+        let next = (y + step).min(y1);
+        let band = Rect::new(r.x0, y.max(y0) as i32, r.x1, next as i32);
         out.push(band);
-        y += TILE_SIZE;
+        y = next;
     }
     out
 }
@@ -170,9 +173,15 @@ fn tile_bands(r: Rect) -> Vec<Rect> {
 fn band_tiles(band: Rect, data: &[f32], channels: usize, keep: impl Fn(&[f32]) -> bool) -> Vec<(Rect, Vec<f32>)> {
     let w = band.width() as usize;
     let mut out = Vec::new();
-    let mut x = band.x0.div_euclid(TILE_SIZE) * TILE_SIZE;
-    while x < band.x1 {
-        let tr = Rect::new(x.max(band.x0), band.y0, (x + TILE_SIZE).min(band.x1), band.y1);
+    if band.is_empty() {
+        return out;
+    }
+    let step = i64::from(TILE_SIZE);
+    let (x0, x1) = (i64::from(band.x0), i64::from(band.x1));
+    let mut x = x0.div_euclid(step) * step;
+    while x < x1 {
+        let next = (x + step).min(x1);
+        let tr = Rect::new(x.max(x0) as i32, band.y0, next as i32, band.y1);
         let tw = tr.width() as usize;
         let mut buf = Vec::with_capacity(tw * tr.height() as usize * channels);
         let mut any = false;
@@ -187,7 +196,7 @@ fn band_tiles(band: Rect, data: &[f32], channels: usize, keep: impl Fn(&[f32]) -
         if any {
             out.push((tr, buf));
         }
-        x += TILE_SIZE;
+        x = next;
     }
     out
 }

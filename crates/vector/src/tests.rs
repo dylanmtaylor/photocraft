@@ -570,3 +570,16 @@ fn thin_antialiased_edges_still_count_toward_bounds() {
     let c = r.render(Rect::new(0, 0, 102, 10));
     assert!(c[100] > 5e-5 && c[101] == 0.0, "{} {}", c[100], c[101]);
 }
+
+#[test]
+fn tile_bands_and_band_tiles_near_i32_max_do_not_overflow() {
+    let r = Rect::new(0, i32::MAX - 10, 10, i32::MAX);
+    let bands = tile_bands(r);
+    assert_eq!(bands, vec![r]);
+
+    let band = Rect::new(i32::MAX - 10, 0, i32::MAX, 2);
+    let data = vec![1.0f32; (band.width() * band.height()) as usize];
+    let tiles = band_tiles(band, &data, 1, |p| p[0] > 0.0);
+    assert_eq!(tiles.len(), 1);
+    assert_eq!(tiles[0].0, band);
+}
