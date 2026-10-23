@@ -87,6 +87,8 @@ impl Tiff<'_> {
         }
     }
     fn text(&self, typ: u16, count: u32, field: usize) -> Option<String> {
+        #[cfg(test)]
+        TEXT_DECODES.with(|c| c.set(c.get() + 1));
         if typ != 2 {
             return None;
         }
@@ -96,6 +98,9 @@ impl Tiff<'_> {
         (!s.is_empty()).then_some(s)
     }
 }
+
+#[cfg(test)]
+thread_local!(static TEXT_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) });
 
 /// Reads [`CameraInfo`] from a TIFF-structured EXIF payload (an `Exif\0\0` prefix is skipped).
 pub fn read(exif: &[u8]) -> CameraInfo {
@@ -287,9 +292,12 @@ mod tests {
         b.extend_from_slice(&0u32.to_le_bytes());
         b.extend_from_slice(&value);
 
+        TEXT_DECODES.with(|c| c.set(0));
         let info = read(&b);
         assert_eq!(info.make.as_deref(), Some("M"));
         assert_eq!(info.date_taken.as_deref(), Some("D"));
+        // One decode per tag: duplicates must be skipped before `text` copies their payload.
+        assert_eq!(TEXT_DECODES.with(|c| c.get()), 2);
     }
 
     #[test]
