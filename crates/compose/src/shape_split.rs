@@ -2,7 +2,7 @@
 //! for shapes with clipped layers: Photoshop draws the stroke above the clipped layers. Cached
 //! per shape state, so tiles (and the GPU's textures) reuse one rasterisation.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
@@ -127,9 +127,10 @@ fn fit_stroke(fill: &Surface, stroke: &mut Surface, cache: &Surface, canvas: Rec
     let whole = r;
     let bare_transparent = [fill, &*stroke, cache].iter().all(|s| s.default_pixel().iter().all(|v| *v == 0.0));
     if bare_transparent {
-        let mut coords: BTreeSet<TileCoord> =
-            fill.tiles().map(|(c, _)| *c).chain(stroke.tiles().map(|(c, _)| *c)).chain(cache.tiles().map(|(c, _)| *c)).collect();
-        for c in coords.drain(..) {
+        let mut coords: Vec<TileCoord> = fill.tiles().map(|(c, _)| *c).chain(stroke.tiles().map(|(c, _)| *c)).chain(cache.tiles().map(|(c, _)| *c)).collect();
+        coords.sort_unstable();
+        coords.dedup();
+        for c in coords {
             let r = c.rect().intersect(&whole);
             if !r.is_empty() {
                 fit_stroke_rect(fill, stroke, cache, r, float);
