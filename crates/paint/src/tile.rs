@@ -346,6 +346,14 @@ mod tests {
         assert_eq!(Mips::new(&invalid).levels, vec![(1, 1, vec![0.0])]);
     }
 
+    /// `u32::MAX * u32::MAX` only overflows `usize` on 32-bit targets (wasm); 64-bit hits the length check.
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn oversized_dimensions_report_address_space_overflow() {
+        let err = serde_json::from_str::<GrayTile>(r#"{"width":4294967295,"height":4294967295,"data":[0.0]}"#).unwrap_err();
+        assert!(err.to_string().contains("tile dimensions overflow the address space"));
+    }
+
     #[test]
     fn preview_downscales_deterministically_and_tolerates_bad_tiles() {
         let t = GrayTile::from_fn(1000, 400, |x, _| if x < 500 { 1.0 } else { 0.0 });
