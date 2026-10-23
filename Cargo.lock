@@ -4837,7 +4837,7 @@ dependencies = [
  "photocraft-text",
  "photocraft-vector",
  "rayon",
- "roxmltree 0.20.0",
+ "roxmltree 0.21.1",
  "same-file",
  "serde",
  "serde_json",
@@ -4928,7 +4928,7 @@ dependencies = [
  "photocraft-vector",
  "proptest",
  "resvg",
- "roxmltree 0.20.0",
+ "roxmltree 0.21.1",
  "serde_json",
  "thiserror 2.0.21",
 ]
