@@ -90,7 +90,7 @@ pub fn chalk_tip(n: u32, seed: u32) -> GrayTile {
 /// Most primitives one generated tip is drawn from, and most (pixel × primitive) visits it costs:
 /// every pixel is tested against every primitive, so both counts are the caller's to multiply.
 const MAX_PRIMITIVES: u32 = 4096;
-const MAX_TIP_WORK: u64 = 1 << 31;
+const MAX_TIP_WORK: u64 = 1 << 27;
 
 /// `count` limited so that an `n`×`n` tip tests at most [`MAX_TIP_WORK`] pixel/primitive pairs.
 fn clamp_primitives(n: u32, count: u32) -> u32 {

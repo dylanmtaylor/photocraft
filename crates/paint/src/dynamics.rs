@@ -347,7 +347,9 @@ impl PathWalker {
                             emitted += 1;
                         }
                         // Cut short: the rest of the segment is skipped, spacing restarts at its end.
-                        self.next_at = if emitted == MAX_DISTANCE_STEPS_PER_SEGMENT { step_len(&p).max(0.25) } else { self.next_at - len };
+                        // Only when the cap held back a step that was still due; a segment that ends right at the cap keeps its carry-over.
+                        let cut_short = emitted == MAX_DISTANCE_STEPS_PER_SEGMENT && self.next_at <= len + 1e-9;
+                        self.next_at = if cut_short { step_len(&p).max(0.25) } else { self.next_at - len };
                     }
                 }
                 Some(iv) => {
@@ -839,5 +841,20 @@ mod walker_budget_tests {
         let before = steps.get();
         walker.push(StrokePoint::new(1.0e9 + 10.0, 0.0, 1.0), &|_: &StrokePoint| 1.0, &mut count);
         assert!(steps.get() > before && steps.get() - before <= 11, "{} more steps", steps.get() - before);
+    }
+
+    #[test]
+    fn a_segment_ending_at_the_cap_keeps_its_carry_over() {
+        let steps = std::cell::Cell::new(0usize);
+        let mut count = |_: StepInput| steps.set(steps.get() + 1);
+        let mut walker = PathWalker::new(None);
+        let one = |_: &StrokePoint| 1.0;
+        walker.push(StrokePoint::new(0.0, 0.0, 1.0), &one, &mut count);
+        // Exactly the cap in steps, then 0.75 left before the next is due.
+        let end = MAX_DISTANCE_STEPS_PER_SEGMENT as f64 + 0.25;
+        walker.push(StrokePoint::new(end, 0.0, 1.0), &one, &mut count);
+        let before = steps.get();
+        walker.push(StrokePoint::new(end + 0.8, 0.0, 1.0), &one, &mut count);
+        assert_eq!(steps.get(), before + 1);
     }
 }
