@@ -581,8 +581,8 @@ fn sanitize_font_blob(blob: Blob<u8>) -> Option<Blob<u8>> {
             let offsets_raw = data.get(12..dir_end)?;
             let mut unique_offsets: Vec<u32> = Vec::with_capacity(n);
             let mut total_axes = 0usize;
-            for (i, chunk) in offsets_raw.chunks_exact(4).enumerate() {
-                let off = u32::from_be_bytes(chunk.try_into().ok()?);
+            for (i, chunk) in offsets_raw.as_chunks::<4>().0.iter().enumerate() {
+                let off = u32::from_be_bytes(*chunk);
                 if unique_offsets.contains(&off) {
                     continue;
                 }

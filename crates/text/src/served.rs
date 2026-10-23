@@ -82,7 +82,7 @@ pub fn is_relative_path(p: &str) -> bool {
             let Ok(byte) = u8::from_str_radix(hex, 16) else { return false };
             // Never allow encoded path syntax (including '%' for a second decode), ASCII
             // separators, or controls. High bytes are allowed only as valid UTF-8 below.
-            if byte <= b' ' || matches!(byte, b'%' | b'/' | b'\\' | b'.' | b'?' | b'#' | b':') {
+            if byte <= b' ' || byte == 0x7f || matches!(byte, b'%' | b'/' | b'\\' | b'.' | b'?' | b'#' | b':') {
                 return false;
             }
             decoded.push(byte);
@@ -360,6 +360,7 @@ mod tests {
             "fonts%2fprivate.ttf",
             "fonts%5cprivate.ttf",
             "fonts/%00.ttf",
+            "fonts/a%7F.ttf",
             "fonts/%20.ttf",
             "fonts/%zz.ttf",
             "fonts/%2.ttf",
