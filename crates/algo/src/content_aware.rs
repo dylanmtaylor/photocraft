@@ -114,6 +114,21 @@ struct Variant {
     ok: Vec<bool>,
 }
 
+/// Most pixels the mosaic of the image and its variants may span. It is one dense rectangle, so
+/// thin images turned to different angles leave it mostly empty: the cost grows with the square
+/// of their length, not with their pixels.
+const MAX_MOSAIC_PIXELS: usize = 1 << 25;
+
+/// Size of the mosaic of an `w`×`h` image and `extra` variants separated by `gap`, or `None`
+/// when it spans more than [`MAX_MOSAIC_PIXELS`] (or overflows).
+fn mosaic_size(w: usize, h: usize, gap: usize, extra: &[Variant]) -> Option<(usize, usize)> {
+    let col_w = extra.iter().map(|v| v.w).max().unwrap_or(0);
+    let col_h = extra.iter().try_fold(0usize, |n, v| n.checked_add(v.h)?.checked_add(gap))?;
+    let mw = w.checked_add(gap)?.checked_add(col_w)?;
+    let mh = h.max(col_h);
+    (mw.checked_mul(mh)? <= MAX_MOSAIC_PIXELS).then_some((mw, mh))
+}
+
 /// A source buffer and which of its pixels may be sampled.
 #[derive(Clone, Copy)]
 struct Src<'a> {
@@ -265,14 +280,12 @@ fn fill_cow(
         }
     };
     // Mosaic: identity at the left, variants in a column to its right, gaps that are no image.
-    // Without variants it is the image itself.
-    let (mw, mh, mosaic, roles): (usize, usize, Option<Vec<f32>>, Vec<Px>) = if extra.is_empty() {
-        (w, h, None, par::map(w * h, true, role))
-    } else {
-        let col_w = extra.iter().map(|v| v.w).max().unwrap_or(0);
-        let col_h: usize = extra.iter().map(|v| v.h + gap).sum();
-        let mw = w + gap + col_w;
-        let mh = h.max(col_h);
+    // Without variants it is the image itself; so it is when the variants would not fit.
+    let size = if extra.is_empty() { None } else { mosaic_size(w, h, gap, &extra) };
+    if size.is_none() {
+        extra.clear();
+    }
+    let (mw, mh, mosaic, roles): (usize, usize, Option<Vec<f32>>, Vec<Px>) = if let Some((mw, mh)) = size {
         let mut mimg = vec![0.0f32; mw * mh * ch];
         let mut roles = vec![Px::Void; mw * mh];
         for y in 0..h {
@@ -297,6 +310,8 @@ fn fill_cow(
             oy += v.h + gap;
         }
         (mw, mh, Some(mimg), roles)
+    } else {
+        (w, h, None, par::map(w * h, true, role))
     };
     drop((extra, ok));
     ctl.check()?;
@@ -695,6 +710,20 @@ pub fn default_brush_size(hole: Rect) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use super::mosaic_size;
+
+    fn blank(w: usize, h: usize) -> super::Variant {
+        super::Variant { w, h, img: Vec::new(), ok: Vec::new() }
+    }
+
+    #[test]
+    fn a_thin_image_with_turned_variants_does_not_get_a_quadratic_mosaic() {
+        // 40000×1 plus its 90° copy (1×40000): about 1.6 billion mosaic cells for 80000 pixels.
+        assert_eq!(mosaic_size(40_000, 1, 8, &[blank(1, 40_000)]), None);
+        assert_eq!(mosaic_size(usize::MAX, 1, 8, &[blank(1, 1)]), None);
+        assert_eq!(mosaic_size(100, 100, 8, &[blank(100, 100)]), Some((208, 108)));
+    }
+
     use super::*;
 
     /// Vertical stripes (period 6) in grey, with a hole in the middle.
