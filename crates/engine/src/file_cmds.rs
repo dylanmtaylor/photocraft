@@ -1477,8 +1477,13 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
         }
         s.actions.playback_steps = playback_steps;
     }
-    let actions =
-        crate::actions_cmds::ActionState { list, playing: s.actions.playing, playback_stack: s.actions.playback_stack.clone(), playback_steps, ..Default::default() };
+    let actions = crate::actions_cmds::ActionState {
+        list,
+        playing: s.actions.playing,
+        playback_stack: s.actions.playback_stack.clone(),
+        playback_steps,
+        ..Default::default()
+    };
     let names = batch_naming::plan(&inputs, &output, &format, p)?;
     let save = SaveOpts::from_params(s, p, cmd)?;
     let authorize = s.authorize;
