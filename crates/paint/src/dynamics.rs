@@ -828,17 +828,16 @@ mod walker_budget_tests {
 
     #[test]
     fn one_far_segment_emits_a_bounded_number_of_steps() {
+        let steps = std::cell::Cell::new(0usize);
+        let mut count = |_: StepInput| steps.set(steps.get() + 1);
         let mut walker = PathWalker::new(None);
-        let mut steps = 0usize;
-        let mut count = |_: StepInput| steps += 1;
-        let spacing = |_: &StrokePoint| 1.0;
-        walker.push(StrokePoint::new(0.0, 0.0, 1.0), &spacing, &mut count);
+        walker.push(StrokePoint::new(0.0, 0.0, 1.0), &|_: &StrokePoint| 1.0, &mut count);
         // At a quarter pixel, a billion-pixel segment is four billion steps.
         walker.push(StrokePoint::new(1.0e9, 0.0, 1.0), &|_: &StrokePoint| 0.25, &mut count);
-        assert!(steps <= MAX_DISTANCE_STEPS_PER_SEGMENT + 1, "{steps}");
+        assert!(steps.get() <= MAX_DISTANCE_STEPS_PER_SEGMENT + 1, "{}", steps.get());
         // Spacing carries on from the end of the cut segment.
-        let before = steps;
+        let before = steps.get();
         walker.push(StrokePoint::new(1.0e9 + 10.0, 0.0, 1.0), &|_: &StrokePoint| 1.0, &mut count);
-        assert!(steps > before && steps - before <= 11, "{} more steps", steps - before);
+        assert!(steps.get() > before && steps.get() - before <= 11, "{} more steps", steps.get() - before);
     }
 }
