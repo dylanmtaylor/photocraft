@@ -24,9 +24,11 @@ pub fn mix(base: &Surface, filtered: &Surface, mask: &LayerMask) -> Surface {
     // Tile by tile: the union of two sparse surfaces far apart is a rectangle of mostly nothing,
     // and transparent pixels in tiles neither surface has stay as they are.
     let whole = area;
+    let same_default = base.default_pixel() == filtered.default_pixel();
     for t in whole.tiles() {
         let area = t.rect().intersect(&whole);
-        if area.is_empty() || (fmt.alpha && !base.has_tiles_in(area) && !filtered.has_tiles_in(area)) {
+        let bare = !base.has_tiles_in(area) && !filtered.has_tiles_in(area);
+        if area.is_empty() || (bare && (fmt.alpha || same_default)) {
             continue;
         }
         let (b, f) = (base.read_region(area), filtered.read_region(area));
@@ -73,9 +75,13 @@ pub fn unmix(base: &Surface, mixed: &Surface, mask: &LayerMask) -> Surface {
     // Tile by tile: the union of two sparse surfaces far apart is a rectangle of mostly nothing,
     // and transparent pixels in tiles neither surface has stay as they are.
     let whole = area;
+    // Non-alpha still needs every tile whose defaults differ (an unmix through a non-unit mask
+    // would change that default, and the clone already holds the old one).
+    let same_default = base.default_pixel() == mixed.default_pixel();
     for t in whole.tiles() {
         let area = t.rect().intersect(&whole);
-        if area.is_empty() || (fmt.alpha && !base.has_tiles_in(area) && !mixed.has_tiles_in(area)) {
+        let bare = !base.has_tiles_in(area) && !mixed.has_tiles_in(area);
+        if area.is_empty() || (bare && (fmt.alpha || same_default)) {
             continue;
         }
         let (b, x) = (base.read_region(area), mixed.read_region(area));

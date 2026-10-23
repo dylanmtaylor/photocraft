@@ -2351,7 +2351,9 @@ fn nested_blend_if_groups_do_not_double_the_work_at_every_level() {
         g.blend_if.set(0, [range([10, 10], [255, 255]), FULL]);
         layers = vec![g];
     }
-    let mut d = doc_white(4, 4);
+    // A black backdrop, not doc_white's white: the asserted white can then only come from the
+    // inner layer rendered through the whole group chain, not from the backdrop itself.
+    let mut d = Document::with_background("t", Size::new(4, 4), ColorMode::Rgb, SampleType::U8, Color::BLACK);
     d.layers.extend(layers);
     let t = std::time::Instant::now();
     assert!(close4(px(&d, 1, 1), [1.0, 1.0, 1.0, 1.0]));

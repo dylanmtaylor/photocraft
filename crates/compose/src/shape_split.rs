@@ -2,13 +2,13 @@
 //! for shapes with clipped layers: Photoshop draws the stroke above the clipped layers. Cached
 //! per shape state, so tiles (and the GPU's textures) reuse one rasterisation.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
 use photocraft_color::{PixelFormat, SampleType};
 use photocraft_doc::vector::ShapeLayer;
-use photocraft_geom::Rect;
+use photocraft_geom::{Rect, TileCoord};
 use photocraft_raster::Surface;
 
 /// (fill, stroke), last use, and the shape's pixels the stroke was fitted to (kept alive so
@@ -119,16 +119,29 @@ fn fit_stroke(fill: &Surface, stroke: &mut Surface, cache: &Surface, canvas: Rec
         return;
     }
     let float = stroke.format().sample == SampleType::F32;
-    // Tile by tile: `r` is the union of what the pixels and the stroke touch, which for sparse
-    // content far apart is mostly empty. Tiles none of the three reach hold only transparent
-    // pixels, which the fit leaves as they are.
+    // Tiles none of the three reaches read as the defaults; with transparent defaults the fit
+    // leaves the stroke's default pixel there, so those tiles are exact skips and we can scan
+    // just the union of the three surfaces' allocated tiles instead of every canvas tile (two
+    // sparse regions on a 300k×300k document would otherwise walk ~1.4M empty tiles). A
+    // non-transparent default is everywhere, so the scan falls back to the full rectangle.
     let whole = r;
-    for t in whole.tiles() {
-        let r = t.rect().intersect(&whole);
-        if r.is_empty() || (!fill.has_tiles_in(r) && !stroke.has_tiles_in(r) && !cache.has_tiles_in(r)) {
-            continue;
+    let bare_transparent = [fill, &*stroke, cache].iter().all(|s| s.default_pixel().iter().all(|v| *v == 0.0));
+    if bare_transparent {
+        let mut coords: BTreeSet<TileCoord> =
+            fill.tiles().map(|(c, _)| *c).chain(stroke.tiles().map(|(c, _)| *c)).chain(cache.tiles().map(|(c, _)| *c)).collect();
+        for c in coords.drain(..) {
+            let r = c.rect().intersect(&whole);
+            if !r.is_empty() {
+                fit_stroke_rect(fill, stroke, cache, r, float);
+            }
         }
-        fit_stroke_rect(fill, stroke, cache, r, float);
+    } else {
+        for t in whole.tiles() {
+            let r = t.rect().intersect(&whole);
+            if !r.is_empty() {
+                fit_stroke_rect(fill, stroke, cache, r, float);
+            }
+        }
     }
 }
 
