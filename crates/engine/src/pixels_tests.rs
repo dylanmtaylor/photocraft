@@ -404,3 +404,37 @@ fn hue_saturation_and_color_balance_keep_a_cmyk_layers_black() {
         assert!((0..4).all(|c| (half[c] - (ink[c] + (want[0][c] - ink[c]) * k)).abs() < 1e-3), "{}: half a selection", adj.label());
     }
 }
+
+/// Two small blocks two billion pixels apart: the content bounds are a grid of 6·10¹³ tiles
+/// that holds nothing, which no adjustment may materialize.
+fn distant_blocks(fmt: PixelFormat, default: f32) -> Surface {
+    let mut s = Surface::with_default(fmt, &vec![default; fmt.channels()]);
+    s.fill_rect(Rect::new(0, 0, 10, 10), &vec![0.25; fmt.channels()]);
+    s.fill_rect(Rect::new(2_000_000_000, 2_000_000_000, 2_000_000_010, 2_000_000_010), &vec![0.25; fmt.channels()]);
+    s
+}
+
+#[test]
+fn adjusting_a_layer_of_distant_blocks_visits_only_its_tiles() {
+    let mut s = distant_blocks(PixelFormat::RGBA8, 0.0);
+    adjust_surface(&mut s, &Adjustment::Invert, None, ColorMode::Rgb);
+    let p = s.read_region(Rect::new(2_000_000_005, 2_000_000_005, 2_000_000_006, 2_000_000_006));
+    // Straight colour inverted, alpha untouched.
+    assert!((p[0] - 0.75).abs() < 0.01 && (p[3] - 0.25).abs() < 0.01, "{p:?}");
+    assert_eq!(s.tile_count(), 2);
+}
+
+#[test]
+fn adjusting_a_mask_of_distant_blocks_visits_only_its_tiles() {
+    let mut m = distant_blocks(PixelFormat::GRAY8, 1.0);
+    adjust_mask(&mut m, &Adjustment::Invert, None);
+    assert!(m.default_pixel()[0] < 0.01, "the default is inverted: {:?}", m.default_pixel());
+    let p = m.read_region(Rect::new(2_000_000_005, 2_000_000_005, 2_000_000_006, 2_000_000_006));
+    assert!((p[0] - 0.75).abs() < 0.01, "{p:?}");
+    // Through a selection of its own distant tiles, too.
+    let mut sel = Surface::new(PixelFormat::GRAY8);
+    sel.fill_rect(Rect::new(2_000_000_000, 2_000_000_000, 2_000_000_010, 2_000_000_010), &[1.0]);
+    adjust_mask(&mut m, &Adjustment::Invert, Some(&sel));
+    let p = m.read_region(Rect::new(2_000_000_005, 2_000_000_005, 2_000_000_006, 2_000_000_006));
+    assert!((p[0] - 0.25).abs() < 0.01, "{p:?}");
+}

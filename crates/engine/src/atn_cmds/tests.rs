@@ -3082,3 +3082,21 @@ fn saves_round_trip_through_photoshop_events() {
     let odd = Action::new("B", vec![("file.saveAs".to_string(), json!({"path": "/out/result.xcf"}))]);
     assert!(export("Saves", &[&odd], &[], false).is_err());
 }
+
+#[test]
+fn long_names_are_clipped_instead_of_copied_into_every_diagnostic() {
+    let long = "N".repeat(5000);
+    let unknown = |n: usize| (0..n).map(|_| item("zzzz", "Mystery", None)).collect::<Vec<_>>();
+    let file = AtnFile {
+        name: UnicodeString::new_nul(&long),
+        expanded: false,
+        actions: vec![AtnAction { name: UnicodeString::new_nul(&long), items: unknown(50), ..Default::default() }],
+        warnings: vec![],
+    };
+    let imp = import(&atn::write(&file).unwrap()).unwrap();
+    assert_eq!(imp.set.chars().count(), MAX_NAME_CHARS);
+    assert_eq!(imp.actions[0].name.chars().count(), MAX_NAME_CHARS);
+    assert_eq!(imp.actions[0].set.as_deref().map(|s| s.chars().count()), Some(MAX_NAME_CHARS));
+    assert_eq!(imp.unsupported.len(), 50);
+    assert!(imp.unsupported.iter().all(|u| u.action.chars().count() == MAX_NAME_CHARS));
+}

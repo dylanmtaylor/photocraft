@@ -3877,10 +3877,18 @@ fn normalise(v: &mut Value) {
     }
 }
 
+/// Longest action or set name kept (Photoshop's own limit is 255). A file's names are lengths it
+/// chooses, and each is copied into every action and every unsupported-step diagnostic.
+const MAX_NAME_CHARS: usize = 1024;
+
+fn clip_name(s: &str) -> String {
+    s.chars().take(MAX_NAME_CHARS).collect()
+}
+
 fn convert_action(a: &AtnAction, set: &str, unsupported: &mut Vec<Unsupported>) -> Action {
-    let name = a.name.to_string_lossy();
+    let name = clip_name(&a.name.to_string_lossy());
     let mut action = Action::new(name.clone(), Vec::new());
-    action.set = Some(set.to_string());
+    action.set = Some(clip_name(set));
     for (i, item) in a.items.iter().enumerate() {
         let mapped = match (event_for(&item.event), &item.descriptor) {
             (Some(e), Some(d)) => (e.from)(d),
@@ -3914,7 +3922,7 @@ fn convert_action(a: &AtnAction, set: &str, unsupported: &mut Vec<Unsupported>) 
 pub fn import(bytes: &[u8]) -> std::result::Result<Imported, String> {
     let file = atn::parse(bytes).map_err(|e| e.to_string())?;
     let set = file.name.to_string_lossy();
-    let set = if set.trim().is_empty() { DEFAULT_SET.to_string() } else { set };
+    let set = if set.trim().is_empty() { DEFAULT_SET.to_string() } else { clip_name(&set) };
     let mut out = Imported { set: set.clone(), warnings: file.warnings.clone(), ..Default::default() };
     for a in &file.actions {
         let action = convert_action(a, &set, &mut out.unsupported);

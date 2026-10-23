@@ -100,6 +100,12 @@ pub struct ActionState {
     /// Number of steps executed by the current top-level playback tree.
     #[serde(skip)]
     pub playback_steps: u64,
+    /// How many scripts (`file.scripts.browse`) are running inside one another.
+    #[serde(skip)]
+    pub script_depth: u8,
+    /// Steps run by the current top-level script and everything it calls.
+    #[serde(skip)]
+    pub script_steps: u64,
     /// Bumped whenever `list` changes, so the preset store can skip unchanged writes.
     #[serde(skip)]
     pub rev: u64,

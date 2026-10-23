@@ -58,6 +58,11 @@ pub fn composite_layers_uncropped(solo: &Document, format: photocraft_color::Pix
     photocraft_compose::composite_to_surface(solo, area, format, None)
 }
 
+/// Most unstored tiles an adjustment materializes for a surface whose unstored tiles are
+/// transparent (4096 tiles are 4 Gpx of RGBA8), and for one whose are not.
+const MAX_DENSE_TILES: u64 = 1 << 12;
+const MAX_OPAQUE_DENSE_TILES: u64 = 1 << 20;
+
 /// Apply an adjustment destructively to a surface, weighted by an optional selection.
 /// Applies `adj` to a surface (any colour model and depth, via straight RGBA) through the
 /// selection; `mode` is the document's, for the tone transfer (e.g. Exposure in Grayscale).
@@ -70,8 +75,19 @@ pub fn adjust_surface(s: &mut Surface, adj: &Adjustment, selection: Option<&Surf
         return;
     }
     let fmt = s.format();
-    let done: Vec<_> = s
-        .take_tiles(r)
+    // Two distant tiles make the content bounds a grid of billions of tiles that hold nothing.
+    // Past a budget only the stored tiles are adjusted: for a transparent default that changes
+    // nothing visible (the gaps stay transparent); an opaque default would change under the
+    // adjustment, so that grid is materialized up to a far larger budget.
+    let grid = (u64::from(r.width()).div_ceil(TILE_SIZE as u64) + 1) * (u64::from(r.height()).div_ceil(TILE_SIZE as u64) + 1);
+    let transparent = fmt.alpha && s.default_pixel().last().is_some_and(|a| *a <= 0.0);
+    let taken = if grid > if transparent { MAX_DENSE_TILES } else { MAX_OPAQUE_DENSE_TILES } {
+        let stored: Vec<_> = s.tiles().map(|(c, _)| *c).filter(|c| !c.rect().intersect(&r).is_empty()).collect();
+        stored.into_iter().flat_map(|c| s.take_tiles(c.rect())).collect()
+    } else {
+        s.take_tiles(r)
+    };
+    let done: Vec<_> = taken
         .into_par_iter()
         .flat_map_iter(|(tc, tile)| {
             // A one-tile surface, so `adjusted` reads and writes this tile only.
@@ -100,9 +116,21 @@ pub fn adjust_mask(s: &mut Surface, adj: &Adjustment, selection: Option<&Surface
     let mode = photocraft_color::ColorMode::Grayscale;
     if let Some(sel) = selection {
         let r = sel.content_bounds();
-        if !r.is_empty() {
-            let out = adjusted(s, r, adj, Some(sel), mode);
-            s.write_region(r, &out);
+        // Tile by tile, and only where the selection stores something (it is unselected, so
+        // unchanged, elsewhere): its content bounds can span a grid of mostly nothing.
+        let sparse = sel.default_pixel().iter().all(|v| *v == 0.0);
+        let tiles: Vec<Rect> = if sparse {
+            sel.tiles().map(|(c, _)| c.rect().intersect(&r)).filter(|t| !t.is_empty()).collect()
+        } else if r.is_empty() {
+            Vec::new()
+        } else {
+            vec![r]
+        };
+        for t in &tiles {
+            let out = adjusted(s, *t, adj, Some(sel), mode);
+            s.write_region(*t, &out);
+        }
+        if !tiles.is_empty() {
             s.prune();
         }
         return;
@@ -110,8 +138,10 @@ pub fn adjust_mask(s: &mut Surface, adj: &Adjustment, selection: Option<&Surface
     let fmt = s.format();
     let unit = Rect::from_xywh(0, 0, 1, 1);
     let mut out = Surface::with_default(fmt, &adjusted(&Surface::with_default(fmt, &s.default_pixel()), unit, adj, None, mode));
-    let r = s.tile_bounds();
-    if !r.is_empty() {
+    // Everything the mask doesn't store reads as its default, which `out` already holds adjusted.
+    // So only the stored tiles are adjusted, not the (possibly huge) rectangle around them.
+    let stored: Vec<Rect> = s.tiles().map(|(c, _)| c.rect()).collect();
+    for r in stored {
         out.write_region(r, &adjusted(s, r, adj, None, mode));
     }
     out.prune();
