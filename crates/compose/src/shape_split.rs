@@ -118,13 +118,28 @@ fn fit_stroke(fill: &Surface, stroke: &mut Surface, cache: &Surface, canvas: Rec
     if r.is_empty() {
         return;
     }
+    let float = stroke.format().sample == SampleType::F32;
+    // Tile by tile: `r` is the union of what the pixels and the stroke touch, which for sparse
+    // content far apart is mostly empty. Tiles none of the three reach hold only transparent
+    // pixels, which the fit leaves as they are.
+    let whole = r;
+    for t in whole.tiles() {
+        let r = t.rect().intersect(&whole);
+        if r.is_empty() || (!fill.has_tiles_in(r) && !stroke.has_tiles_in(r) && !cache.has_tiles_in(r)) {
+            continue;
+        }
+        fit_stroke_rect(fill, stroke, cache, r, float);
+    }
+}
+
+/// [`fit_stroke`] over one rectangle.
+fn fit_stroke_rect(fill: &Surface, stroke: &mut Surface, cache: &Surface, r: Rect, float: bool) {
     let n = r.width() as usize * r.height() as usize;
     let (mut f, mut s, mut c) = (vec![[0.0f32; 4]; n], vec![[0.0f32; 4]; n], vec![[0.0f32; 4]; n]);
     fill.read_rgba_into(r, &mut f);
     stroke.read_rgba_into(r, &mut s);
     cache.read_rgba_into(r, &mut c);
     let mut out = Vec::with_capacity(n * 4);
-    let float = stroke.format().sample == SampleType::F32;
     for ((fp, sp), cp) in f.iter().zip(&s).zip(&c) {
         let mut p = *sp;
         if fp[3] < 1.0 - 1e-3 {
