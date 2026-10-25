@@ -39,13 +39,13 @@ clap = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+craft-update = { workspace = true }
 rfd = { workspace = true }
 arboard = { version = "3.6", features = ["wayland-data-control"] }
 open = "5"
 # Reads the saved window layout (eframe persistence) to drop values that would abort startup.
 ron = "0.12"
 # Background release checks; HTTPS with Rust TLS, no async runtime.
-ureq = { version = "3.4", default-features = false, features = ["rustls", "platform-verifier"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Safe CoreGraphics bindings, compatible with the existing macOS 11 deployment target.
