@@ -85,7 +85,9 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     {
         let was_open = app.updates_rt.updater.prompt_open();
         app.updates_rt.updater.tick(ctx);
-        match app.updates_rt.updater.show(ctx) {
+        // The restart helper is scheduled before the app closes, so no update starts over unsaved work.
+        let clean = !app.has_unsaved_work();
+        match app.updates_rt.updater.show_if(ctx, clean) {
             craft_update::updater::Action::None => {}
             craft_update::updater::Action::OpenUrl(url) => download = Some(url),
             // The guarded close path asks about unsaved work and waits for saves; the restart helper
