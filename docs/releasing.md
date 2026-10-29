@@ -264,7 +264,7 @@ Why these formats:
   ```
 
   Sandbox permissions (justified in the manifest): Wayland with X11 fallback, IPC (X11
-  shared memory), `dri` for the GPU, and read/write access to Pictures and Documents. Every
+  shared memory), `dri` for the GPU, the CUPS socket and Avahi for printing, and read/write access to Pictures and Documents. Every
   other file goes through the file-chooser and document portals. There's no network, so the
   `--control` server is only reachable from inside the sandbox until the user runs
   `flatpak override --user --share=network ai.storyteller.photocraft`. Host fonts are read from

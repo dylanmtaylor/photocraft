@@ -29,9 +29,11 @@ finish-args:
   - --share=network
   # GPU access for the wgpu compositor (Vulkan, or GL as a fallback).
   - --device=dri
-  # Printing: the host's CUPS socket, so File › Print reaches the print server directly (IPP,
-  # in process). Without it the app shows the system print dialog through the print portal.
+  # Printing: the host's CUPS socket, for the bundled lp/lpstat (the cups-client module) and the
+  # in-process IPP client. Without it the app shows the system print dialog through the print portal.
   - --socket=cups
+  # Driverless network printers are found through Avahi (`lpstat -e`).
+  - --system-talk-name=org.freedesktop.Avahi
   # Open/Save dialogs go through the file-chooser portal (rfd's xdg-portal backend) and
   # drag-and-drop through the document portal, so picked files work anywhere without broad
   # filesystem access. Pictures and Documents are granted so files passed by path (the command
@@ -42,6 +44,23 @@ finish-args:
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
 modules:
+  # CUPS client tools for craft-print: the runtime has libcups but not lpstat/lp/lpoptions.
+  # Linked statically against this release's libcups, so a runtime update can't break them;
+  # the socket path matches the host's, which --socket=cups mounts.
+  - name: cups-client
+    buildsystem: simple
+    build-commands:
+      - ./configure --prefix=/app --sysconfdir=/etc --localstatedir=/var --with-rundir=/run/cups
+        --with-domainsocket=/run/cups/cups.sock --disable-shared --with-components=libcups
+        --with-dnssd=avahi --with-tls=gnutls --disable-pam --disable-dbus
+      - make -C cups libs
+      - make -C systemv lp lpoptions lpstat
+      - install -Dm755 -t /app/bin systemv/lp systemv/lpoptions systemv/lpstat
+      - install -Dm644 -t /app/share/licenses/cups LICENSE NOTICE
+    sources:
+      - type: archive
+        url: https://github.com/OpenPrinting/cups/releases/download/v2.4.20/cups-2.4.20-source.tar.gz
+        sha256: ab4d9cd7f3e58060091d2b24972223d6401675f11c49b65abf4f6ef31dea22ff
   - name: photocraft
     buildsystem: simple
     build-options:
