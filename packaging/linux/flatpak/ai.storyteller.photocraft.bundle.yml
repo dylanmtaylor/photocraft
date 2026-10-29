@@ -62,30 +62,26 @@ modules:
         url: https://github.com/OpenPrinting/cups/releases/download/v2.4.20/cups-2.4.20-source.tar.gz
         sha256: ab4d9cd7f3e58060091d2b24972223d6401675f11c49b65abf4f6ef31dea22ff
       # Runs each tool. Flatpak mounts the host's CUPS socket at /var/run/cups/cups.sock, choosing
-      # it as flatpak-run-cups.c does: a socket CUPS_SERVER, else the first `ServerName /path` in
-      # ~/.cups/client.conf (that exact spelling), else the default. A socket path the sandbox
-      # lacks is pointed there only when it is the one Flatpak chose, so a job never goes to a
-      # different server; otherwise CUPS fails on the missing path. Server names are left alone.
+      # it as flatpak-run-cups.c does from the host's CUPS_SERVER, else the first line spelled
+      # exactly `ServerName /path` in ~/.cups/client.conf, else the default. A client.conf socket
+      # the sandbox lacks is pointed there only when it is the one Flatpak chose. A CUPS_SERVER
+      # is never redirected: one set by `flatpak run --env` or an override is not what Flatpak
+      # mounted. Otherwise CUPS fails on the missing path rather than reach a different server.
       - type: script
         dest-filename: cups-socket.sh
         commands:
           - 'conf="$HOME/.cups/client.conf"'
-          - 'server="${CUPS_SERVER:-}"'
-          - 'if [ -z "$server" ] && [ -r "$conf" ]; then'
+          - 'if [ -z "${CUPS_SERVER:-}" ] && [ -r "$conf" ]; then'
           - '  server=$(sed -n ''s/^[[:space:]]*[Ss][Ee][Rr][Vv][Ee][Rr][Nn][Aa][Mm][Ee][[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p'' "$conf" | tail -n 1)'
-          - 'fi'
-          - 'case "$server" in'
-          - '  /*)'
-          - '    if [ ! -S "$server" ]; then'
-          - '      mounted="${CUPS_SERVER:-}"'
-          - '      case "$mounted" in /*:* | [!/]* | '''') mounted= ;; esac'
-          - '      if [ -z "$mounted" ] && [ -r "$conf" ]; then'
+          - '  case "$server" in'
+          - '    /*)'
+          - '      if [ ! -S "$server" ]; then'
           - '        mounted=$(sed -n ''s/^[[:space:]]*ServerName \(.*\)$/\1/p'' "$conf" | sed ''s/^[[:space:]]*//'' | grep -m 1 ''^/[^:]*$'')'
+          - '        [ "$mounted" = "$server" ] && export CUPS_SERVER=/var/run/cups/cups.sock'
           - '      fi'
-          - '      [ "$mounted" = "$server" ] && export CUPS_SERVER=/var/run/cups/cups.sock'
-          - '    fi'
-          - '    ;;'
-          - 'esac'
+          - '      ;;'
+          - '  esac'
+          - 'fi'
           - 'exec "/app/libexec/cups/${0##*/}" "$@"'
   - name: photocraft
     buildsystem: simple
