@@ -980,12 +980,24 @@ fn a_preferred_app_spooler_takes_the_job() {
     assert!(std::path::Path::new(&out).exists());
 }
 
+#[cfg(unix)]
 #[test]
-fn a_printer_listing_slower_than_its_timeout_is_given_up() {
-    let quick = std::time::Duration::from_secs(5);
-    assert_eq!(within(quick, || 7), Some(7));
-    let slow = || std::thread::sleep(std::time::Duration::from_secs(2));
-    assert_eq!(within(std::time::Duration::from_millis(50), slow), None);
+fn a_printer_listing_past_its_deadline_is_killed_and_reaped() {
+    let soon = || std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut echo = std::process::Command::new("sh");
+    echo.args(["-c", "echo printer Office is idle."]);
+    assert_eq!(output_by(echo, soon()).as_deref(), Some("printer Office is idle.\n"));
+    // A hung lpstat: given up at the deadline, and killed, so nothing is left waiting on it.
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("pid");
+    let mut hung = std::process::Command::new("sh");
+    hung.arg("-c").arg(format!("echo $$ > '{}'; exec sleep 30", pid_file.display()));
+    let started = std::time::Instant::now();
+    assert_eq!(output_by(hung, started + std::time::Duration::from_millis(300)), None);
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "the deadline must cut the wait short");
+    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    assert!(!std::path::Path::new(&format!("/proc/{}", pid.trim())).exists(), "the hung process must be killed and reaped");
+    assert_eq!(output_by(std::process::Command::new("/nonexistent/lpstat"), soon()), None);
 }
 
 #[test]

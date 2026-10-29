@@ -261,10 +261,10 @@ fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -
         }
         if let Some(name) = system_spooler() {
             require_windows_pdf()?;
-            // lpstat is CUPS, not a Windows driver, so it runs outside SPOOLER. A listing slower
-            // than LP_LISTING_TIMEOUT can't tell, so lp gets the job as it did before the check.
+            // lpstat is CUPS, not a Windows driver, so it runs outside SPOOLER. A listing that
+            // can't finish in time can't tell, so lp gets the job as it did before the check.
             let route = match name {
-                "lp" => within(LP_LISTING_TIMEOUT, craft_print::printers).map_or_else(|| Some(lp.clone()), |list| lp_route(lp, &list)),
+                "lp" => lp_printers(LP_LISTING_TIMEOUT).map_or_else(|| Some(lp.clone()), |list| lp_route(lp, &list)),
                 _ => Some(lp.clone()),
             };
             return match (route, spooler) {
@@ -289,17 +289,47 @@ fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -
 /// How long a print job waits for CUPS' printer list (`lpstat`, whose `-e` browses the network).
 const LP_LISTING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// `f`'s answer, or `None` when it takes longer than `timeout` or its thread can't start. A late
-/// `f` finishes on its own thread, which also reaps any process it started.
-fn within<T: Send + 'static>(timeout: std::time::Duration, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+/// CUPS' printers as `craft_print::printers` lists them, or `None` when `lpstat` can't start or
+/// either listing outlasts `timeout`. Each `lpstat` is killed and reaped at the deadline, so a
+/// hung one never outlives the job.
+fn lp_printers(timeout: std::time::Duration) -> Option<Vec<craft_print::Printer>> {
+    let deadline = std::time::Instant::now() + timeout;
+    let queues = output_by(craft_print::lpstat_command(), deadline)?;
+    // `lpstat -e`, as craft-print runs it (its builder is private): the driverless printers.
+    let mut driverless = std::process::Command::new("lpstat");
+    driverless.arg("-e").env("LC_ALL", "C").env("LANG", "C").env("SOFTWARE", "Craft");
+    let available = output_by(driverless, deadline)?;
+    Some(craft_print::printers_parsed(&queues, Some(&available)))
+}
+
+/// `command`'s standard output, or `None` when it can't start or is still running at `deadline`;
+/// then it is killed and reaped. The output is read on its own thread, so a full pipe can't stall
+/// the wait, and that thread ends when the process does.
+fn output_by(mut command: std::process::Command, deadline: std::time::Instant) -> Option<String> {
+    use std::io::Read as _;
+    use std::process::Stdio;
+    let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut stdout = child.stdout.take()?;
     let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::Builder::new()
-        .name("print-listing".into())
-        .spawn(move || {
-            let _ = sender.send(f());
-        })
-        .ok()?;
-    receiver.recv_timeout(timeout).ok()
+    let reader = std::thread::Builder::new().name("print-listing".into()).spawn(move || {
+        let mut out = Vec::new();
+        let _ = sender.send(stdout.read_to_end(&mut out).map(|_| out));
+    });
+    let finished = reader.is_ok()
+        && loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break true,
+                Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(20)),
+                _ => break false,
+            }
+        };
+    if !finished {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    let out = receiver.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).ok()?.ok()?;
+    Some(String::from_utf8_lossy(&out).into_owned())
 }
 
 /// The job for `lp`, or `None` when CUPS lists no printer: `lp` has nowhere to send it, and the
