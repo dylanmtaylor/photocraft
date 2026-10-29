@@ -26,8 +26,8 @@ the preview and generated PDF continue to share `print_cmds::layout`.
 | Route | When | What the user sees |
 |---|---|---|
 | **`craft-print`** (`lp` on CUPS, the Windows spooler) | `lp` is on the path (macOS, Linux, the Flatpak, which bundles it) and CUPS lists a printer, or on Windows | `Sent to the printer (request id is Office-42)` |
-| **CUPS over IPP** (`photocraft-ipp`) | No `lp` on the path, or CUPS lists no printer to it, and a print server answers: `CUPS_SERVER`, then `/run/cups/cups.sock`, `/var/run/cups/cups.sock`, `/private/var/run/cupsd`, then `localhost:631`; always for a `printServer` named in the request | `Sent to the printer (job 42 on Office)` |
-| **Print portal** (`org.freedesktop.portal.Print`, desktop app on Linux) | No print server reachable or no printer set up, or always with `PHOTOCRAFT_PRINT_PORTAL=1` | The system print dialog, seeded with the copies and paper; the outcome goes to the log |
+| **CUPS over IPP** (`photocraft-ipp`) | No `lp` on the path and a print server answers: `CUPS_SERVER`, then `/run/cups/cups.sock`, `/var/run/cups/cups.sock`, `/private/var/run/cupsd`, then `localhost:631`; always for a `printServer` named in the request | `Sent to the printer (job 42 on Office)` |
+| **Print portal** (`org.freedesktop.portal.Print`, desktop app on Linux) | No print server reachable or no printer set up (including when `lp` is there but CUPS lists no printer), or always with `PHOTOCRAFT_PRINT_PORTAL=1` | The system print dialog, seeded with the copies and paper; the outcome goes to the log |
 | **Print to PDF** | `output` given (the Output field of the dialog) | The file; nothing is spooled unless `send` is true |
 
 A route that exists but fails (an unknown printer, a job the queue refuses) is an error; only a

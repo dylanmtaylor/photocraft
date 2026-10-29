@@ -54,12 +54,27 @@ modules:
         --with-dnssd=avahi --with-tls=gnutls --disable-pam --disable-dbus
       - make -C cups libs
       - make -C systemv lp lpoptions lpstat
-      - install -Dm755 -t /app/bin systemv/lp systemv/lpoptions systemv/lpstat
+      - install -Dm755 -t /app/libexec/cups systemv/lp systemv/lpoptions systemv/lpstat
+      - for tool in lp lpoptions lpstat; do install -Dm755 cups-socket.sh "/app/bin/$tool"; done
       - install -Dm644 -t /app/share/licenses/cups LICENSE NOTICE
     sources:
       - type: archive
         url: https://github.com/OpenPrinting/cups/releases/download/v2.4.20/cups-2.4.20-source.tar.gz
         sha256: ab4d9cd7f3e58060091d2b24972223d6401675f11c49b65abf4f6ef31dea22ff
+      # Runs each tool. Flatpak mounts the host's CUPS socket at /var/run/cups/cups.sock whatever
+      # path CUPS_SERVER or ~/.cups/client.conf names, so a socket path missing in the sandbox is
+      # pointed there; host names (remote servers) and sockets that exist are left alone.
+      - type: script
+        dest-filename: cups-socket.sh
+        commands:
+          - server="${CUPS_SERVER:-}"
+          - if [ -z "$server" ] && [ -r "$HOME/.cups/client.conf" ]; then
+          - '  server=$(sed -n ''s/^[[:space:]]*[Ss][Ee][Rr][Vv][Ee][Rr][Nn][Aa][Mm][Ee][[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p'' "$HOME/.cups/client.conf" | tail -n 1)'
+          - fi
+          - case "$server" in
+          - '  /*) [ -S "$server" ] || export CUPS_SERVER=/var/run/cups/cups.sock ;;'
+          - esac
+          - exec "/app/libexec/cups/${0##*/}" "$@"
   - name: photocraft
     buildsystem: simple
     build-commands:

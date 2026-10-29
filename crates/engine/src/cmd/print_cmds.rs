@@ -250,8 +250,8 @@ enum SpoolError {
 
 /// Sends the job and says where it went and through what. A named print server takes the IPP
 /// route. Otherwise: the app's spooler when it is preferred; else `craft-print` (`lp`, or the
-/// Windows spooler) when it is there; else CUPS over IPP; and the app's spooler when that had
-/// no route either. A route that exists but fails (an unknown printer, a refused job) is an
+/// Windows spooler) when it is there, or the app's spooler when CUPS lists no printer for `lp`;
+/// else CUPS over IPP; and the app's spooler when that had no route either. A route that exists but fails (an unknown printer, a refused job) is an
 /// error, never a fall-through.
 fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -> Result<(String, String)> {
     let app = |sp: &Spooler| (sp.run)(job).map(|m| (m, sp.name.to_string())).map_err(other);
@@ -261,10 +261,19 @@ fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -
         }
         if let Some(name) = system_spooler() {
             require_windows_pdf()?;
-            let route = if name == "lp" { lp_route(lp, &with_spooler(craft_print::printers)) } else { Some(lp.clone()) };
-            if let Some(lp) = route {
-                return with_spooler(|| craft_print::submit(&job.pdf, &lp)).map(|m| (m, name.to_string())).map_err(other);
-            }
+            // lpstat is CUPS, not a Windows driver, so it runs outside SPOOLER. A listing slower
+            // than LP_LISTING_TIMEOUT can't tell, so lp gets the job as it did before the check.
+            let route = match name {
+                "lp" => within(LP_LISTING_TIMEOUT, craft_print::printers).map_or_else(|| Some(lp.clone()), |list| lp_route(lp, &list)),
+                _ => Some(lp.clone()),
+            };
+            return match (route, spooler) {
+                (Some(lp), _) => with_spooler(|| craft_print::submit(&job.pdf, &lp)).map(|m| (m, name.to_string())).map_err(other),
+                // CUPS lists no printer. IPP would ask the same CUPS, or (it ignores client.conf)
+                // another server whose printer the user never chose, so only the portal is left.
+                (None, Some(sp)) => app(sp),
+                (None, None) => Err(other("no printers found; set one up in the system's printer settings, or print to PDF")),
+            };
         }
     }
     match cups_spool(job) {
@@ -277,8 +286,24 @@ fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -
     }
 }
 
+/// How long a print job waits for CUPS' printer list (`lpstat`, whose `-e` browses the network).
+const LP_LISTING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// `f`'s answer, or `None` when it takes longer than `timeout` or its thread can't start. A late
+/// `f` finishes on its own thread, which also reaps any process it started.
+fn within<T: Send + 'static>(timeout: std::time::Duration, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("print-listing".into())
+        .spawn(move || {
+            let _ = sender.send(f());
+        })
+        .ok()?;
+    receiver.recv_timeout(timeout).ok()
+}
+
 /// The job for `lp`, or `None` when CUPS lists no printer: `lp` has nowhere to send it, and the
-/// IPP route and the portal still may (a Flatpak bundles `lp`). With no printer asked for, no
+/// portal still may (a Flatpak bundles `lp`). With no printer asked for, no
 /// default and one printer, that printer, as `resolve_printer` picks for IPP.
 fn lp_route(lp: &craft_print::Job, printers: &[craft_print::Printer]) -> Option<craft_print::Job> {
     let mut lp = lp.clone();

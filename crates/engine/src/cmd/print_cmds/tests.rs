@@ -981,10 +981,18 @@ fn a_preferred_app_spooler_takes_the_job() {
 }
 
 #[test]
+fn a_printer_listing_slower_than_its_timeout_is_given_up() {
+    let quick = std::time::Duration::from_secs(5);
+    assert_eq!(within(quick, || 7), Some(7));
+    let slow = || std::thread::sleep(std::time::Duration::from_secs(2));
+    assert_eq!(within(std::time::Duration::from_millis(50), slow), None);
+}
+
+#[test]
 fn lp_takes_the_job_only_when_cups_lists_a_printer_and_picks_the_only_one() {
     let p = |name: &str, default: bool| craft_print::Printer { name: name.into(), default, two_sided: None, description: String::new() };
     let job = craft_print::Job::default();
-    // No printers: no lp route, so the IPP route and the portal still get the job.
+    // No printers: no lp route, so the portal still gets the job.
     assert!(lp_route(&job, &[]).is_none());
     assert_eq!(lp_route(&job, &[p("Office", false)]).and_then(|j| j.printer), Some("Office".into()));
     assert_eq!(lp_route(&job, &[p("Office", false), p("Lab", true)]).and_then(|j| j.printer), None, "lp picks the default itself");
