@@ -61,20 +61,32 @@ modules:
       - type: archive
         url: https://github.com/OpenPrinting/cups/releases/download/v2.4.20/cups-2.4.20-source.tar.gz
         sha256: ab4d9cd7f3e58060091d2b24972223d6401675f11c49b65abf4f6ef31dea22ff
-      # Runs each tool. Flatpak mounts the host's CUPS socket at /var/run/cups/cups.sock whatever
-      # path CUPS_SERVER or ~/.cups/client.conf names, so a socket path missing in the sandbox is
-      # pointed there; host names (remote servers) and sockets that exist are left alone.
+      # Runs each tool. Flatpak mounts the host's CUPS socket at /var/run/cups/cups.sock, choosing
+      # it as flatpak-run-cups.c does: a socket CUPS_SERVER, else the first `ServerName /path` in
+      # ~/.cups/client.conf (that exact spelling), else the default. A socket path the sandbox
+      # lacks is pointed there only when it is the one Flatpak chose, so a job never goes to a
+      # different server; otherwise CUPS fails on the missing path. Server names are left alone.
       - type: script
         dest-filename: cups-socket.sh
         commands:
-          - server="${CUPS_SERVER:-}"
-          - if [ -z "$server" ] && [ -r "$HOME/.cups/client.conf" ]; then
-          - '  server=$(sed -n ''s/^[[:space:]]*[Ss][Ee][Rr][Vv][Ee][Rr][Nn][Aa][Mm][Ee][[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p'' "$HOME/.cups/client.conf" | tail -n 1)'
-          - fi
-          - case "$server" in
-          - '  /*) [ -S "$server" ] || export CUPS_SERVER=/var/run/cups/cups.sock ;;'
-          - esac
-          - exec "/app/libexec/cups/${0##*/}" "$@"
+          - 'conf="$HOME/.cups/client.conf"'
+          - 'server="${CUPS_SERVER:-}"'
+          - 'if [ -z "$server" ] && [ -r "$conf" ]; then'
+          - '  server=$(sed -n ''s/^[[:space:]]*[Ss][Ee][Rr][Vv][Ee][Rr][Nn][Aa][Mm][Ee][[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p'' "$conf" | tail -n 1)'
+          - 'fi'
+          - 'case "$server" in'
+          - '  /*)'
+          - '    if [ ! -S "$server" ]; then'
+          - '      mounted="${CUPS_SERVER:-}"'
+          - '      case "$mounted" in /*:* | [!/]* | '''') mounted= ;; esac'
+          - '      if [ -z "$mounted" ] && [ -r "$conf" ]; then'
+          - '        mounted=$(sed -n ''s/^[[:space:]]*ServerName \(.*\)$/\1/p'' "$conf" | sed ''s/^[[:space:]]*//'' | grep -m 1 ''^/[^:]*$'')'
+          - '      fi'
+          - '      [ "$mounted" = "$server" ] && export CUPS_SERVER=/var/run/cups/cups.sock'
+          - '    fi'
+          - '    ;;'
+          - 'esac'
+          - 'exec "/app/libexec/cups/${0##*/}" "$@"'
   - name: photocraft
     buildsystem: simple
     build-commands:
