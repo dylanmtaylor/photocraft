@@ -678,6 +678,14 @@ fn spool_transport_streams_pdf_and_propagates_refusal() {
         b"#!/bin/sh\nif [ \"$2\" = Refuse ]; then echo 'queue refused' >&2; exit 1; fi\nprintf '%s\\n' \"$@\" > \"$PHOTOCRAFT_TEST_PRINT_TRANSPORT/args\"\n/bin/cat > \"$PHOTOCRAFT_TEST_PRINT_TRANSPORT/received.pdf\"\necho 'request id is Office-42 (0 file(s))'\n",
     ).unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // `lp` takes a job only when CUPS lists a printer (`lp_route`), so the fake CUPS lists its queues.
+    let lpstat = dir.path().join("lpstat");
+    std::fs::write(
+        &lpstat,
+        b"#!/bin/sh\nif [ \"$1\" = -e ]; then printf 'Office\\nRefuse\\n'; else printf 'printer Office is idle.\\nprinter Refuse is idle.\\n'; fi\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&lpstat, std::fs::Permissions::from_mode(0o700)).unwrap();
     let result = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "cmd::print_cmds::tests::spool_transport_streams_pdf_and_propagates_refusal", "--nocapture"])
         .env(CHILD, dir.path())
@@ -970,6 +978,19 @@ fn a_preferred_app_spooler_takes_the_job() {
     let r = s.execute("file.print", json!({"output": out})).unwrap();
     assert_eq!((r["sent"].as_bool(), r["pdf"].as_str()), (Some(false), Some(out.as_str())));
     assert!(std::path::Path::new(&out).exists());
+}
+
+#[test]
+fn lp_takes_the_job_only_when_cups_lists_a_printer_and_picks_the_only_one() {
+    let p = |name: &str, default: bool| craft_print::Printer { name: name.into(), default, two_sided: None, description: String::new() };
+    let job = craft_print::Job::default();
+    // No printers: no lp route, so the IPP route and the portal still get the job.
+    assert!(lp_route(&job, &[]).is_none());
+    assert_eq!(lp_route(&job, &[p("Office", false)]).and_then(|j| j.printer), Some("Office".into()));
+    assert_eq!(lp_route(&job, &[p("Office", false), p("Lab", true)]).and_then(|j| j.printer), None, "lp picks the default itself");
+    assert_eq!(lp_route(&job, &[p("Office", false), p("Lab", false)]).and_then(|j| j.printer), None);
+    let asked = craft_print::Job { printer: Some("Lab".into()), ..Default::default() };
+    assert_eq!(lp_route(&asked, &[p("Office", false)]).and_then(|j| j.printer), Some("Lab".into()));
 }
 
 #[cfg(not(target_os = "windows"))]

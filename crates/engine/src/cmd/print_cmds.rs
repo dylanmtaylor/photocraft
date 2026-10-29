@@ -261,7 +261,10 @@ fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -
         }
         if let Some(name) = system_spooler() {
             require_windows_pdf()?;
-            return with_spooler(|| craft_print::submit(&job.pdf, lp)).map(|m| (m, name.to_string())).map_err(other);
+            let route = if name == "lp" { lp_route(lp, &with_spooler(craft_print::printers)) } else { Some(lp.clone()) };
+            if let Some(lp) = route {
+                return with_spooler(|| craft_print::submit(&job.pdf, &lp)).map(|m| (m, name.to_string())).map_err(other);
+            }
         }
     }
     match cups_spool(job) {
@@ -272,6 +275,20 @@ fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -
         },
         Err(SpoolError::Failed(why)) => Err(other(why)),
     }
+}
+
+/// The job for `lp`, or `None` when CUPS lists no printer: `lp` has nowhere to send it, and the
+/// IPP route and the portal still may (a Flatpak bundles `lp`). With no printer asked for, no
+/// default and one printer, that printer, as `resolve_printer` picks for IPP.
+fn lp_route(lp: &craft_print::Job, printers: &[craft_print::Printer]) -> Option<craft_print::Job> {
+    let mut lp = lp.clone();
+    if lp.printer.is_none()
+        && !printers.iter().any(|p| p.default)
+        && let [only] = printers
+    {
+        lp.printer = Some(only.name.clone());
+    }
+    (!printers.is_empty()).then_some(lp)
 }
 
 /// The spooler `craft-print` can talk to, as the job's `backend` name: `lp` when CUPS' command
