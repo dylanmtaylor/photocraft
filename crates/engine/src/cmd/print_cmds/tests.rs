@@ -986,7 +986,13 @@ fn a_printer_listing_past_its_deadline_is_killed_and_reaped() {
     let soon = || std::time::Instant::now() + std::time::Duration::from_secs(5);
     let mut echo = std::process::Command::new("sh");
     echo.args(["-c", "echo printer Office is idle."]);
-    assert_eq!(output_by(echo, soon()).as_deref(), Some("printer Office is idle.\n"));
+    assert_eq!(output_by(echo, soon()), Some((true, "printer Office is idle.\n".to_string())));
+    let mut failed = std::process::Command::new("sh");
+    failed.args(["-c", "exit 1"]);
+    assert_eq!(output_by(failed, soon()), Some((false, String::new())), "a failed listing is told apart from an empty one");
+    let mut flood = std::process::Command::new("sh");
+    flood.args(["-c", "head -c 2000000 /dev/zero"]);
+    assert_eq!(output_by(flood, soon()), None, "an oversized listing is no answer");
     // A hung lpstat: given up at the deadline, and killed, so nothing is left waiting on it.
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("pid");
@@ -996,7 +1002,9 @@ fn a_printer_listing_past_its_deadline_is_killed_and_reaped() {
     assert_eq!(output_by(hung, started + std::time::Duration::from_millis(300)), None);
     assert!(started.elapsed() < std::time::Duration::from_secs(5), "the deadline must cut the wait short");
     let pid = std::fs::read_to_string(&pid_file).unwrap();
-    assert!(!std::path::Path::new(&format!("/proc/{}", pid.trim())).exists(), "the hung process must be killed and reaped");
+    // `kill -0` fails for a process that no longer exists, on every Unix.
+    let alive = std::process::Command::new("kill").args(["-0", pid.trim()]).stderr(std::process::Stdio::null()).status().unwrap().success();
+    assert!(!alive, "the hung process must be killed and reaped");
     assert_eq!(output_by(std::process::Command::new("/nonexistent/lpstat"), soon()), None);
 }
 
@@ -1011,6 +1019,9 @@ fn lp_takes_the_job_only_when_cups_lists_a_printer_and_picks_the_only_one() {
     assert_eq!(lp_route(&job, &[p("Office", false), p("Lab", false)]).and_then(|j| j.printer), None);
     let asked = craft_print::Job { printer: Some("Lab".into()), ..Default::default() };
     assert_eq!(lp_route(&asked, &[p("Office", false)]).and_then(|j| j.printer), Some("Lab".into()));
+    // A named printer goes to lp even when CUPS lists none: listing can be forbidden while
+    // printing is not, and the portal can't honour a name.
+    assert_eq!(lp_route(&asked, &[]).and_then(|j| j.printer), Some("Lab".into()));
 }
 
 #[cfg(not(target_os = "windows"))]

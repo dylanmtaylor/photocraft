@@ -289,23 +289,30 @@ fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -
 /// How long a print job waits for CUPS' printer list (`lpstat`, whose `-e` browses the network).
 const LP_LISTING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// CUPS' printers as `craft_print::printers` lists them, or `None` when `lpstat` can't start or
-/// either listing outlasts `timeout`. Each `lpstat` is killed and reaped at the deadline, so a
-/// hung one never outlives the job.
+/// The most a printer listing may print; a longer one counts as no answer.
+const LP_LISTING_CAP: u64 = 1 << 20;
+
+/// CUPS' printers as `craft_print::printers` lists them, or `None` when that can't be told: an
+/// `lpstat` can't start, outlasts `timeout`, prints more than `LP_LISTING_CAP`, or `lpstat -e`
+/// fails (CUPS unreachable, or listing forbidden by policy). `lpstat -p -d`'s own status is not
+/// a failure: it exits 1 whenever there are no queues, as on a host with only driverless
+/// printers. Each `lpstat` is killed and reaped at the deadline, so a hung one never outlives
+/// the job.
 fn lp_printers(timeout: std::time::Duration) -> Option<Vec<craft_print::Printer>> {
     let deadline = std::time::Instant::now() + timeout;
-    let queues = output_by(craft_print::lpstat_command(), deadline)?;
+    let (_, queues) = output_by(craft_print::lpstat_command(), deadline)?;
     // `lpstat -e`, as craft-print runs it (its builder is private): the driverless printers.
     let mut driverless = std::process::Command::new("lpstat");
     driverless.arg("-e").env("LC_ALL", "C").env("LANG", "C").env("SOFTWARE", "Craft");
-    let available = output_by(driverless, deadline)?;
-    Some(craft_print::printers_parsed(&queues, Some(&available)))
+    let (listed, available) = output_by(driverless, deadline)?;
+    listed.then(|| craft_print::printers_parsed(&queues, Some(&available)))
 }
 
-/// `command`'s standard output, or `None` when it can't start or is still running at `deadline`;
-/// then it is killed and reaped. The output is read on its own thread, so a full pipe can't stall
-/// the wait, and that thread ends when the process does.
-fn output_by(mut command: std::process::Command, deadline: std::time::Instant) -> Option<String> {
+/// Whether `command` succeeded, and its standard output; `None` when it can't start, prints more
+/// than `LP_LISTING_CAP`, or is still running at `deadline`, when it is killed and reaped. The
+/// output is read on its own thread, so a full pipe can't stall the wait, and that thread ends
+/// when the process does.
+fn output_by(mut command: std::process::Command, deadline: std::time::Instant) -> Option<(bool, String)> {
     use std::io::Read as _;
     use std::process::Stdio;
     let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
@@ -313,28 +320,33 @@ fn output_by(mut command: std::process::Command, deadline: std::time::Instant) -
     let (sender, receiver) = std::sync::mpsc::channel();
     let reader = std::thread::Builder::new().name("print-listing".into()).spawn(move || {
         let mut out = Vec::new();
-        let _ = sender.send(stdout.read_to_end(&mut out).map(|_| out));
+        // One byte over the cap tells an oversized listing apart; stopping closes the pipe.
+        let _ = sender.send((&mut stdout).take(LP_LISTING_CAP + 1).read_to_end(&mut out).map(|_| out));
     });
-    let finished = reader.is_ok()
-        && loop {
+    let status = reader.ok().and_then(|_| {
+        loop {
             match child.try_wait() {
-                Ok(Some(_)) => break true,
+                Ok(Some(status)) => break Some(status),
                 Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(20)),
-                _ => break false,
+                _ => break None,
             }
-        };
-    if !finished {
+        }
+    });
+    let Some(status) = status else {
         let _ = child.kill();
         let _ = child.wait();
         return None;
-    }
+    };
     let out = receiver.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).ok()?.ok()?;
-    Some(String::from_utf8_lossy(&out).into_owned())
+    let fits = u64::try_from(out.len()).is_ok_and(|n| n <= LP_LISTING_CAP);
+    fits.then(|| (status.success(), String::from_utf8_lossy(&out).into_owned()))
 }
 
-/// The job for `lp`, or `None` when CUPS lists no printer: `lp` has nowhere to send it, and the
-/// portal still may (a Flatpak bundles `lp`). With no printer asked for, no
-/// default and one printer, that printer, as `resolve_printer` picks for IPP.
+/// The job for `lp`, or `None` when no printer was asked for and CUPS lists none: `lp` has
+/// nowhere to send it, and the portal still may (a Flatpak bundles `lp`). A printer asked for by
+/// name always goes to `lp`, which knows it even where CUPS won't list it, and the portal could
+/// not honour the name. With no printer asked for, no default and one printer, that printer, as
+/// `resolve_printer` picks for IPP.
 fn lp_route(lp: &craft_print::Job, printers: &[craft_print::Printer]) -> Option<craft_print::Job> {
     let mut lp = lp.clone();
     if lp.printer.is_none()
@@ -343,7 +355,7 @@ fn lp_route(lp: &craft_print::Job, printers: &[craft_print::Printer]) -> Option<
     {
         lp.printer = Some(only.name.clone());
     }
-    (!printers.is_empty()).then_some(lp)
+    (lp.printer.is_some() || !printers.is_empty()).then_some(lp)
 }
 
 /// The spooler `craft-print` can talk to, as the job's `backend` name: `lp` when CUPS' command
